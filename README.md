@@ -9,7 +9,7 @@
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-pip install -r requirements-minimal.txt
+pip install -r requirements-minimal.txt -c constraints-runtime.txt
 export TECHDOC_DATA_DIR="$PWD/runtime_data"
 export TECHDOC_KNOWLEDGE_MODE=1
 export TECHDOC_DEPLOYMENT_MODE=local
@@ -60,7 +60,7 @@ python -m scripts.audit_catalog --data-dir /path/to/runtime_data
 
 ## 验证与边界
 
-公开仓库保留最小部署、合成回归子集及 GitHub Actions 验证流程；完整工程测试和真实语料不在本仓库。依赖范围由 requirements 定义，具体目标主机仍应验证。
+公开仓库保留最小部署、合成回归子集及 GitHub Actions 验证流程；完整工程测试和真实语料不在本仓库。最小 CPU 镜像已经在 CI 与云主机实际构建并通过容器内启动、认证、导入和原文读取检查。基础镜像固定到官方摘要，constraints-runtime.txt 固定已验证的最小运行依赖；Dense 镜像及真实模型挂载尚需单独验收。
 
 ```bash
 python scripts/smoke_minimal.py

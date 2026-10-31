@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install runtime and test dependencies
-        run: python -m pip install -r requirements-minimal.txt pytest
+        run: python -m pip install -r requirements-minimal.txt -c constraints-runtime.txt pytest
       - name: Synthetic contract and BM25 regression (no provider calls)
         run: python -m scripts.evaluate_regression --output-dir /tmp/rag-regression
       - name: Guard and provider regression
