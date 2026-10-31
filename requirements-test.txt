@@ -1,0 +1,3 @@
+# Test dependencies are separate from the deployed runtime image.
+pytest==9.1.1
+httpx2==2.16.0

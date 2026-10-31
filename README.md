@@ -65,7 +65,8 @@ python -m scripts.audit_catalog --data-dir /path/to/runtime_data
 ```bash
 python scripts/smoke_minimal.py
 python -m scripts.evaluate_regression --output-dir /tmp/rag-regression
-# 需要安装 pytest，以下测试不调用外部模型
+# 以下测试不调用外部模型
+pip install -r requirements-test.txt
 python -m pytest tests -q
 ```
 
