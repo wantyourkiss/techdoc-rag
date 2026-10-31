@@ -829,6 +829,34 @@ class DocumentStore:
                     'proposed_chunk_ids':[h['chunk']['chunk_id'] for h in shadow_hits],
                     'proposed_excerpt_details':shadow_details,
                     'extra_model_calls':0,'applied_to_answer':False}
+        locator_shadow=None
+        if plan.policy=='shadow' and not overview:
+            from .locator_shadow import LocatorIntent,compare_context
+            from .diagnostics import QueryCancelled
+            locator=LocatorIntent.build(question,selected,data.docs,knowledge_scope.labels if knowledge_scope else ())
+            locator_hits,locator_shadow=locator.propose(hits,data.by_block)
+            locator_details=excerpt_details
+            if locator_shadow['order_changed']:
+                try:
+                    if mode=='answer':
+                        _,_,locator_details=trace.call('query_plan_shadow',context_builder,
+                            locator_hits,data.chunks,data.by_block,context_question,frozenset(selected),
+                            window_policy=window_policy,
+                            **({'required_snapshots':knowledge_scope.required_snapshots} if knowledge_scope else {}))
+                    else:
+                        _,locator_details=trace.call('query_plan_shadow',select_excerpts,
+                            locator_hits,data.by_block,context_question,limit=4,chars_each=260,chars_total=1040,
+                            prefer_rank=self.reranker is not None,window_policy=window_policy,
+                            required_snapshots=knowledge_scope.required_snapshots if knowledge_scope else (frozenset(selected) if multi else None))
+                except QueryCancelled:raise
+                except Exception:
+                    # Shadow-only diagnostics must not replace a valid baseline
+                    # answer or publish proposed text when observation fails.
+                    locator_shadow.update(status='shadow_context_unavailable',reason_code='SOURCE_CONTEXT_CHECK_FAILED')
+                    locator_details=None
+            if locator_details is not None:
+                locator_shadow=compare_context(locator_shadow,excerpt_details,locator_details,data.by_block,
+                    knowledge_scope.required_snapshots if knowledge_scope else (frozenset(selected) if multi else frozenset()))
         work=None
         if inspect_only:
             if mode!='answer':raise ValueError('INSPECTION_REQUIRES_ANSWER_PIPELINE')
@@ -865,7 +893,7 @@ class DocumentStore:
         result.update({'retriever':retriever,'excerpt_limit_chars':260,'evidence_is_preview_not_answer':True,'dense_runtime_enabled':not overview and self.retriever_mode in ('dense','hybrid'), 'dense_quality_verified':False, 'dense_verified':False,
                        'reranker_enabled':not overview and self.reranker is not None, 'rerank_trace':rerank_trace,
                        'answer_semantics_verified':False,
-                       'query_plan':plan.public(),'query_plan_shadow':plan_shadow,
+                       'query_plan':plan.public(),'query_plan_shadow':plan_shadow,'locator_shadow':locator_shadow,
                        'context_policy':context_policy,'structure':data.structure.stats(),
                        'generation_policy':generation_policy,
                        'index_generation':read_view.generation_id if read_view else None,

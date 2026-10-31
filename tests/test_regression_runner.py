@@ -9,3 +9,9 @@ def test_runner_baseline_and_injected_guard_regression(monkeypatch):
     monkeypatch.setattr('techdoc.generation.contradiction',lambda *_:None)
     broken=suite.evaluate()
     assert not broken['passed'] and broken['metrics']['unsafe_publications']>0
+
+
+def test_runner_notices_missing_question_association(monkeypatch):
+    monkeypatch.setattr('techdoc.evidence_map.associate',lambda *_:None)
+    result=suite.evaluate()
+    assert not result['passed'] and result['metrics']['locator_association_passed']<6

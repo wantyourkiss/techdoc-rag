@@ -253,6 +253,11 @@ class RunService:
                         'locator':json.loads(row['locator_json']),'section':row['section'],'parser_verified':bool(row['parser_verified']),
                         'semantic_support_verified':False})
                 result['source_extracts']=sources
+                result.pop('question_evidence',None)
+                if run['purpose']=='chat' and run['status'] in ('succeeded','abstained'):
+                    from .evidence_map import associate
+                    mapping=associate(run['question'],sources)
+                    if mapping is not None:result['question_evidence']=mapping
                 if run['status']=='abstained':
                     result.update(safe_output='',generated_claims=[],model_support_review_passed=False,answer_semantics_verified=False)
                     result.pop('draft',None);result.pop('supports',None);result.pop('claim_supports',None)
@@ -474,7 +479,7 @@ class RunService:
                 payload['llm_invoked']=invoked or may_have_called
             # Actual quotes have one authoritative citation record, assembled on read.
             for key in ('source_extracts','extracts','excerpt_details','source_download_path','source_download_paths',
-                        'retrieved_evidence','retrieved_evidence_kind','evidence_only_reference'):
+                        'retrieved_evidence','retrieved_evidence_kind','evidence_only_reference','question_evidence'):
                 payload.pop(key,None)
             payload.pop('draft',None)
             if state=='abstained':

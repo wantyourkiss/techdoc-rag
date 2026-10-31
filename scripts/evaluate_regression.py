@@ -63,19 +63,43 @@ def evaluate():
             baseline.append({'id':case['id'],'policy':policy,'expected_published':expected,'published':result['published'],
               'passed':result['published']==expected,'status':result['status'],'actual_provider_calls':0})
     answers=baseline+[answer_case(case,policy) for case in BOUNDARY_CASES for policy in POLICIES]
-    retrieval=retrieval_cases();root=Path(techdoc.__file__).resolve().parent.parent
+    retrieval=retrieval_cases();locator=locator_cases();root=Path(techdoc.__file__).resolve().parent.parent
     files=sorted(list((root/'techdoc').rglob('*.py'))+[root/'scripts/probe_factual_errors.py'])
     manifest={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in files if '__pycache__' not in p.parts}
     metrics={'answer_cases':len(answers),'unsafe_publications':sum(not r['expected_published'] and r['published'] for r in answers),
       'false_refusals':sum(r['expected_published'] and not r['published'] for r in answers),
       'synthetic_bm25_queries':len(retrieval),'synthetic_top1_hits':sum(r['passed'] for r in retrieval),
       'synthetic_mrr':sum(r['reciprocal_rank'] for r in retrieval)/len(retrieval),
+      'locator_association_contracts':len(locator),'locator_association_passed':sum(r['passed'] for r in locator),
       'real_dense_quality':None,'real_generation_accuracy':None,'human_gold':False}
     return {'contract':'synthetic_regression_v1','kind':'AUTOMATED_CONTRACT_REGRESSION_NOT_REAL_MODEL_OR_GOLD',
-      'passed':all(r['passed'] for r in answers+retrieval),'actual_provider_calls':0,'metrics':metrics,
+      'passed':all(r['passed'] for r in answers+retrieval+locator),'actual_provider_calls':0,'metrics':metrics,
       'elapsed_seconds':round(time.monotonic()-start,3),'python':platform.python_version(),
       'policy_ids':list(POLICIES),'source_manifest':manifest,
-      'recipe_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),'answers':answers,'retrieval':retrieval}
+      'recipe_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),'answers':answers,'retrieval':retrieval,'locator_association':locator}
+
+
+def locator_cases():
+    """Synthetic metadata/association contracts; never a retrieval quality score."""
+    from techdoc.locator_shadow import LocatorIntent
+    from techdoc.evidence_map import associate
+    docs={'s':{'filename':'Guide.pdf'}}
+    blocks={'b1':{'locator':{'page':1}},'b2':{'locator':{'page':2}}}
+    hits=[{'score':2-i,'chunk':{'snapshot_id':'s','chunk_id':str(i),
+        'source_spans':[{'block_id':'b'+str(i)}]}} for i in (1,2)]
+    before=json.dumps(hits,sort_keys=True)
+    proposed,meta=LocatorIntent.build('《Guide》PDF第2页',['s'],docs).propose(hits,blocks)
+    plain=LocatorIntent.build('《Guide》第2页',['s'],docs)
+    unknown=LocatorIntent.build('《PRIVATE》PDF第2页',['s'],docs)
+    association=associate('What is the timeout? What about bananas?',
+        [{'citation_id':'own-citation','quotes':['The timeout is 30 seconds.']}])
+    checks=[('physical_page_observation',proposed[0]['chunk']['chunk_id']=='2' and meta['order_changed']),
+      ('formal_candidates_unchanged',json.dumps(hits,sort_keys=True)==before and not meta['applied_to_answer'] and meta['extra_model_calls']==0),
+      ('unspecified_page_not_physical',plain.page_state=='unspecified_page'),
+      ('unresolved_title_not_guessed',not unknown.matched and unknown.target is None and 'PRIVATE' not in json.dumps(unknown.public())),
+      ('own_citation_association',association is not None and association['parts'][0]['citation_ids']==['own-citation']),
+      ('no_semantic_coverage_claim',association is not None and association['parts'][1]['state']=='unlinked' and association['semantic_coverage_verified'] is False)]
+    return [{'id':ident,'passed':bool(passed)} for ident,passed in checks]
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output-dir',required=True);args=parser.parse_args()
