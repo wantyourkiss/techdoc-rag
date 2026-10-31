@@ -1,0 +1,40 @@
+services:
+  techdoc:
+    build:
+      context: .
+      target: runtime
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8765:8765"
+    environment:
+      TECHDOC_DATA_DIR: /data
+      TECHDOC_KNOWLEDGE_MODE: "1"
+      TECHDOC_DEPLOYMENT_MODE: public
+      TECHDOC_BROWSER_USER: ${TECHDOC_BROWSER_USER:?Set TECHDOC_BROWSER_USER in .env}
+      TECHDOC_BROWSER_PASSWORD: ${TECHDOC_BROWSER_PASSWORD:?Set TECHDOC_BROWSER_PASSWORD in .env}
+      TECHDOC_RETRIEVER: bm25
+      TECHDOC_INFERENCE_POLICY: isolated_v1
+      TECHDOC_INDEX_POLICY: staged_v1
+      TECHDOC_GENERATION_POLICY: legacy
+      TECHDOC_FOLLOWUP_RECIPE: separate_v1
+      TECHDOC_OVERVIEW_SAMPLING: representative_v1
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_OUTPUT_MODE: ${LLM_OUTPUT_MODE:-json_schema}
+    volumes:
+      - rag_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,base64,os; a=base64.b64encode((os.environ['TECHDOC_BROWSER_USER']+':'+os.environ['TECHDOC_BROWSER_PASSWORD']).encode()).decode(); urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8765/health',headers={'Authorization':'Basic '+a}), timeout=5)"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 120s
+volumes:
+  rag_data:

@@ -1,0 +1,22 @@
+services:
+  techdoc:
+    build:
+      target: dense
+    environment:
+      TECHDOC_RETRIEVER: hybrid
+      TECHDOC_EMBEDDING_MODEL: /models/bge-m3
+      TECHDOC_RERANKER_MODEL: /models/bge-reranker-v2-m3
+      TECHDOC_ALLOW_MODEL_DOWNLOAD: "0"
+      TECHDOC_MODEL_INT8: "1"
+      TECHDOC_CPU_THREADS: "2"
+      TECHDOC_RERANK_CPU_THREADS: "4"
+      TECHDOC_RERANK_QUANT_ENGINE: onednn
+      TECHDOC_RERANK_BATCH_SIZE: "1"
+      TECHDOC_RERANK_CACHE_CAPACITY: "4096"
+      TECHDOC_RERANK_CACHE: /data/rerank-cache.json
+      TECHDOC_EMBEDDING_CACHE: /data/embedding-cache.json
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    volumes:
+      - ${BGE_M3_HOST_DIR:?Set BGE_M3_HOST_DIR}:/models/bge-m3:ro
+      - ${RERANKER_HOST_DIR:?Set RERANKER_HOST_DIR}:/models/bge-reranker-v2-m3:ro

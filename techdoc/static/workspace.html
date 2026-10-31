@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>知识库 · RAG</title><link rel="stylesheet" href="/assets/workspace.css"><script src="/assets/workspace-model.js" defer></script><script src="/assets/query-stream.js" defer></script><script src="/assets/workspace-chat.js" defer></script><script src="/assets/workspace-studio.js" defer></script><script src="/assets/workspace-overview.js" defer></script><script src="/assets/workspace-layout.js" defer></script><script src="/assets/workspace-uploads.js" defer></script><script src="/assets/workspace.js" defer></script></head>
+<body>
+<header class="global-header"><a class="brand" href="/" data-home>▧ <span>知识库</span></a><span class="candidate">单人知识库工作区</span><span class="header-note">基于你的资料，整理与学习</span></header>
+<div id="notice" role="status" aria-live="polite" hidden></div>
+<section id="auth-panel" hidden class="auth-panel"><h2>登录已失效</h2><p>已暂停自动请求。重新登录后读取服务器状态，不会自动重复上传。</p><button id="relogin">重新登录</button></section>
+<section id="route-error" hidden class="auth-panel"><h2>无法打开此知识库</h2><p id="route-error-text"></p><a href="/" data-home>返回我的知识库</a></section>
+<main id="home" class="home">
+ <div class="home-heading"><div><p class="eyebrow">你的资料，从这里开始</p><h1>我的知识库</h1></div><button class="primary" data-create>＋ 新建知识库</button></div>
+ <div class="home-tools"><div class="state-tabs" aria-label="知识库状态"><button data-state="active" aria-pressed="true">知识库</button><button data-state="archived" aria-pressed="false">已归档</button><button data-state="trashed" aria-pressed="false">回收站</button></div><label class="search">⌕ <input id="kb-search" type="search" placeholder="搜索知识库名称或简介" aria-label="搜索知识库名称或简介"></label><label class="sort"><span class="sr-only">排序</span><select id="kb-sort"><option value="updated">按资料更新时间</option><option value="name">按名称</option><option value="created">按创建时间</option></select></label><button id="view-toggle" aria-pressed="false">列表视图</button></div>
+ <div id="library-list" class="library-grid" aria-live="polite"></div><button id="more-libraries" hidden>加载更多知识库</button>
+</main>
+<section id="workspace" hidden>
+ <header class="workspace-header"><a href="/" data-home class="back">← <span>我的知识库</span></a><h1 id="kb-title"></h1><label class="switch-label"><span class="sr-only">切换知识库</span><select id="kb-switch"></select></label><button id="kb-rename">重命名</button><span id="read-only" class="tag" hidden>已归档 · 只读</span></header>
+ <nav class="compact-tools" aria-label="工作区"><button id="open-sources" aria-expanded="false">☰ 资料 · <span id="compact-count">0</span></button><div role="tablist" aria-label="工作区页面"><button role="tab" id="chat-tab" data-tab="chat" aria-selected="true" aria-controls="chat-panel">对话</button><button role="tab" id="studio-tab" data-tab="studio" aria-selected="false" aria-controls="studio-panel">Studio</button></div></nav>
+ <div id="source-backdrop" hidden></div>
+ <div class="workspace-grid">
+  <aside id="source-panel" class="source-panel panel" aria-labelledby="sources-heading">
+   <div class="panel-heading"><h2 id="sources-heading">资料 <span id="source-total" class="count">0</span></h2><button id="close-sources" class="compact-only" aria-label="关闭资料">×</button><button id="manage-sources">管理</button></div>
+   <button id="add-source" class="add-source">＋ 添加资料</button>
+   <label class="source-search"><input type="search" id="source-search" placeholder="搜索资料名称" aria-label="搜索资料名称"></label>
+   <label class="select-all"><input id="select-all" type="checkbox"> 全部可用资料</label>
+   <button id="select-visible" class="text-button" hidden>选择当前搜索结果</button>
+   <div id="source-list" class="source-list"></div><div id="import-list" class="import-list" aria-live="polite"></div>
+   <p id="selection-status" class="selection-status"></p><p class="hint">勾选用于下次提问，点击名称阅读原文。</p>
+  </aside>
+  <main id="chat-panel" class="chat-panel panel" role="tabpanel" aria-labelledby="chat-tab">
+   <div class="panel-heading"><h2>对话</h2><span id="session-title" class="session-title"></span><button id="rename-chat">改名</button><button id="history-chat">历史</button><button id="new-chat">新对话</button></div>
+   <div id="chat-welcome" class="chat-empty"><div class="book-icon">▧</div><h2 id="chat-title"></h2><p id="chat-summary"></p><p class="muted">回答依据来自所选资料，点击引用可以核对原文。</p><p class="muted query-expectation">全新问题首次处理可能需要数十秒。重复提问可能因缓存加快，实际时间取决于资料范围和模型响应。</p></div>
+   <div id="overview-main" class="overview-main"></div>
+   <button id="older-messages" class="text-button" hidden>加载更早消息</button><div id="messages" class="messages" aria-live="polite"></div>
+   <div class="composer"><label for="question">问题草稿</label><textarea id="question" rows="3" maxlength="2000" placeholder="向你的资料提问…"></textarea><div class="composer-controls"><label><input id="compare-sources" type="checkbox"> 对比所选资料</label><label><span class="sr-only">回答方式</span><select id="answer-mode"><option value="answer">生成回答</option><option value="evidence_only">查找原文</option></select></label><button id="stop-chat" hidden>停止回答</button><button id="recover-chat" hidden>查询提交状态</button><button id="send-chat" class="primary">发送 ↑</button></div><p id="chat-status" class="hint" role="status"></p><div class="composer-footer"><span id="composer-scope">请选择资料</span><span class="muted">草稿保存在当前标签页</span></div></div>
+  </main>
+  <aside id="studio-panel" class="studio-panel panel" role="tabpanel" aria-labelledby="studio-tab"><div class="panel-heading"><h2>Studio</h2><button id="new-note">＋ 笔记</button></div><div id="overview-tools" class="overview-tools"></div><div id="studio-notes" class="studio-notes"></div><p class="hint studio-hint">手写笔记不要求选择资料，收藏回答不会再次调用模型。</p></aside>
+  <div id="resize-left" class="column-grip left" role="separator" aria-label="调整资料栏宽度" aria-orientation="vertical" tabindex="0"></div><div id="resize-right" class="column-grip right" role="separator" aria-label="调整 Studio 栏宽度" aria-orientation="vertical" tabindex="0"></div>
+ </div>
+</section>
+<dialog id="action-dialog"><form id="action-form"><div class="dialog-heading"><h2 id="action-title"></h2><button type="button" data-close="action-dialog" aria-label="关闭">×</button></div><div id="action-body"></div><p id="action-error" class="error" role="alert" hidden></p><div class="dialog-actions"><button id="action-cancel" type="button" data-close="action-dialog">取消</button><button class="primary" id="action-submit" type="submit">保存</button></div></form></dialog>
+<dialog id="reader-dialog" class="reader-dialog"><div class="dialog-heading"><div><p class="eyebrow">资料原文</p><h2 id="reader-title"></h2><p id="reader-version" class="hint"></p></div><button id="close-reader" aria-label="关闭原文">×</button></div><div id="reader-body" class="reader-body"></div><div class="reader-actions"><button id="reader-more" hidden>继续阅读</button><a id="reader-download" class="button" download>下载原件</a></div></dialog>
+<dialog id="manage-dialog" class="manage-dialog"><div class="dialog-heading"><h2>知识库管理</h2><button type="button" data-close="manage-dialog" aria-label="关闭管理">×</button></div><p>管理选择与问答勾选互相独立，退出管理会清空管理选择。</p><label><input id="manage-search" type="search" placeholder="筛选资料名称" aria-label="筛选管理资料"></label><span id="manage-count" class="hint"></span><div id="manage-list"></div><div class="dialog-actions"><button id="show-trash">查看已移除资料</button><button id="preview-remove" class="danger">预览移除</button></div></dialog>
+<dialog id="note-dialog" class="note-dialog"><div class="dialog-heading"><h2>笔记</h2><button id="close-note" aria-label="关闭笔记">×</button></div><label class="field">标题<input id="note-title" maxlength="200"></label><label class="field">正文<textarea id="note-body" rows="14" maxlength="100000"></textarea></label><p id="note-status" class="hint" role="status"></p><div id="note-citations"></div><div id="note-server" hidden><h3>服务器版本（只读）</h3><pre id="note-server-body"></pre></div><div class="dialog-actions"><button id="note-load-server" hidden>对照服务器版本</button><button id="note-copy">另存副本</button><button id="note-save" class="primary">保存笔记</button></div></dialog>
+<dialog id="overview-dialog" class="note-dialog"><div class="dialog-heading"><h2>资料概览</h2><button id="close-overview" aria-label="关闭概览">×</button></div><div id="overview-body"></div><div class="dialog-actions"><button id="cancel-overview" hidden>停止整理</button><button id="collect-overview" hidden>保存为笔记</button><button id="regenerate-overview">按当前范围生成新版本</button></div></dialog>
+</body></html>

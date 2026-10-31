@@ -1,0 +1,9 @@
+-r requirements-minimal.txt
+# Install using a Python version supported by your PyTorch and SentenceTransformers builds.
+qdrant-client>=1.12,<2
+sentence-transformers>=3,<6
+sentencepiece>=0.2,<1
+transformers>=4.41,<5
+# Install CPU-only PyTorch first using https://download.pytorch.org/whl/cpu.
+# smoke script only:
+httpx>=0.27,<1

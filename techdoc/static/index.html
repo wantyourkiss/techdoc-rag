@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+ <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+ <title>TechDoc RAG · 资料问答</title>
+ <link rel="stylesheet" href="/assets/ui.css">
+ <script src="/assets/query-stream.js" defer></script>
+ <script src="/assets/ui-model.js" defer></script>
+ <script src="/assets/app.js" defer></script>
+</head>
+<body>
+ <a class="skip-link" href="#main">跳到主要内容</a>
+ <header class="site-header">
+  <a class="brand" href="/" aria-label="TechDoc RAG 首页"><span class="brand-mark" aria-hidden="true">R</span><span>TechDoc <strong>RAG</strong><small>资料有据，回答可查</small></span></a>
+  <nav class="top-nav" aria-label="主要功能"><a href="/" data-view="query" aria-current="page">资料问答</a><a href="/?view=documents" data-view="documents">文档管理</a><a href="/?learn=1" data-view="learn">教程学习</a></nav>
+  <span class="service-state" id="serviceState" role="status">正在连接服务</span>
+ </header>
+ <div class="active-request" id="activeRequest" hidden><span id="activeRequestLabel"></span><button class="text-button" id="returnToRequest" type="button">返回查看</button><button class="text-button" id="stopActive" type="button">停止</button></div>
+ <main id="main" tabindex="-1">
+  <section id="view-query" aria-labelledby="queryTitle">
+   <div class="page-heading"><p class="eyebrow">你的文档，就是回答的依据</p><h1 id="queryTitle">从资料里，找到答案。</h1><p>选择要参考的文档，直接提问。答案和来源一起呈现。</p></div>
+   <div class="query-layout">
+    <aside class="panel source-picker" aria-labelledby="pickerTitle"><div class="section-heading"><h2 id="pickerTitle">回答依据</h2><span class="counter" id="selectedCount">已选 0 份</span></div><p class="muted">勾选要参考的资料，最多 4 份。每份文档选择一个版本。</p><div id="documentChoices" class="document-choices" aria-live="polite"><p class="empty-small">正在加载资料…</p></div><button type="button" class="secondary full-width" id="selectTutorials">选择两份教程</button><a class="quiet-link" href="/?view=documents" data-view="documents">导入或管理资料 →</a></aside>
+    <div class="query-main">
+     <section class="panel question-panel" aria-labelledby="askTitle"><h2 id="askTitle">你想了解什么？</h2><div id="scopeSummary" class="scope-summary">请先选择回答依据</div><form id="queryForm"><label class="sr-only" for="question">你的问题</label><textarea id="question" maxlength="2000" placeholder="例如：为什么文档分块时要保留重叠？" required></textarea><div class="question-footer"><span class="muted" id="questionCount">0 / 2000</span><button type="submit" class="primary" id="search" data-run>提问 <span aria-hidden="true">↗</span></button></div><details class="advanced"><summary>回答选项</summary><label for="answerMode">回答方式</label><select id="answerMode"><option value="answer">自然语言回答，附原文来源</option><option value="evidence_only">只查找原文</option><option value="llm">由模型选择原文摘录</option></select></details></form></section>
+     <section class="panel result-panel" aria-labelledby="answerTitle"><div class="section-heading"><h2 id="answerTitle">回答与来源</h2><button type="button" class="text-button" id="clearResult">清除显示</button></div><div id="queryResult"><div class="empty-state"><span aria-hidden="true">⌕</span><h3>从一个问题开始</h3><p>先选择资料，再输入你想了解的问题。也可以进入教程学习，试试入门题。</p></div></div></section>
+    </div>
+   </div>
+  </section>
+  <section id="view-documents" hidden aria-labelledby="documentsTitle"><div class="page-heading"><p class="eyebrow">整理资料，也保留来路</p><h1 id="documentsTitle">文档管理</h1><p>导入文档、选择版本，或下载原文件核对内容。</p></div><div class="manage-layout"><section class="panel"><div class="section-heading"><h2>我的资料</h2><button class="text-button" id="refreshDocuments" type="button">刷新</button></div><div id="managedDocuments" class="managed-documents"></div></section><div><section class="panel" id="documentDetail" aria-live="polite"></section><section class="panel"><h2>导入资料</h2><p class="muted">支持 PDF、Word、Markdown、HTML、TXT，单个文件最大 8 MB。</p><form id="uploadForm"><label for="uploadFile">选择文件</label><input id="uploadFile" type="file" name="file" accept=".pdf,.docx,.md,.html,.htm,.txt" required><label for="productVersion">版本名称</label><input id="productVersion" type="text" name="product_version" maxlength="120" placeholder="例如：v2、2026年10月"><label class="checkbox-row"><input type="checkbox" id="asRevision"><span>保存为当前文档的新版本，保留旧版本</span></label><p id="revisionTarget" class="muted"></p><button type="submit" class="primary" id="uploadButton">上传文档</button></form><p id="uploadStatus" class="feedback" role="status"></p></section></div></div></section>
+  <section id="view-learn" hidden aria-labelledby="learnTitle"><div class="page-heading"><p class="eyebrow">从理解概念，到对照原文</p><h1 id="learnTitle">RAG 与 Agent 入门练习</h1><p>每次学一道题，读解释、看原文，再与系统回答对照。</p></div><div class="learning-progress"><label for="learningProgress" id="learningProgressLabel">已看懂 0 / 10 题</label><progress id="learningProgress" max="10" value="0"></progress><span class="muted">学习状态只保存在当前浏览器</span></div><div class="learn-layout"><aside><details id="lessonDirectory" class="panel lesson-directory" open><summary>练习目录 <span class="muted">共 10 题</span></summary><ol id="lessonList"></ol></details><details class="learning-note"><summary>如何使用这些练习？</summary><p>草稿和类比帮助理解，不能代替原文。学习进度由你标记，不是系统评分。</p><p>页码从 PDF 第一页起算。教程里的代码和数字属于示例。</p></details></aside><div><article class="panel lesson-card" id="lessonCard"></article><div class="lesson-navigation"><button class="secondary" id="previousLesson" type="button">← 上一题</button><span id="lessonPosition" class="muted"></span><button class="secondary" id="nextLesson" type="button">下一题 →</button></div></div></div></section>
+ </main>
+ <footer class="site-footer">TechDoc RAG · 答案由模型生成并核对来源，请结合原文判断。</footer>
+ <div id="toast" class="toast" role="status" hidden></div>
+ <dialog id="deleteDialog" aria-labelledby="deleteTitle"><h2 id="deleteTitle">删除这份文档？</h2><p id="deleteTarget"></p><p>所选版本及其原文件将被永久删除，其他版本保留。此操作不可撤销。</p><p id="deleteError" class="feedback" role="status"></p><div class="dialog-actions"><button class="secondary" type="button" id="cancelDelete">取消</button><button class="danger" type="button" id="confirmDelete">永久删除所选版本</button></div></dialog>
+</body>
+</html>
