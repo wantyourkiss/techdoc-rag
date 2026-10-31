@@ -344,6 +344,8 @@ class LexicalIndex:
 
 class DocumentStore:
     def __init__(self, path: Path, cap: int = 550):
+        from .runtime_config import llm_timeout_seconds
+        self.llm_timeout_s=llm_timeout_seconds()
         self.path=Path(path);self.path.mkdir(parents=True,exist_ok=True)
         self.originals=self.path/'originals';self.originals.mkdir(exist_ok=True)
         self.cap=cap;self.lock=threading.RLock();self.docs={};self.blocks={};self.chunks=[]
@@ -381,6 +383,7 @@ class DocumentStore:
             if hasattr(self.reranker,'score_cache'):
                 self.reranker.score_cache.prune(self.chunks);self.reranker.score_cache.flush()
     def _load(self):
+        self._recover_legacy_ingests()
         # Files with this exact temporary prefix are never committed snapshots.
         # After a crash between tempfile creation and os.replace, ignore and
         # discard them before globbing *.json. Single-process deployment only.
@@ -412,6 +415,30 @@ class DocumentStore:
             self.blocks[p.stem]=blocks
             self._stamp_snapshot(p.stem)
         self._rebuild()
+
+    def _recover_legacy_ingests(self):
+        # Only a journal created before publishing a NEW legacy snapshot can
+        # authorize removal; never infer ownership from an unreferenced file.
+        for writing in self.path.glob('.tmp_ingest_*.journal.writing'):
+            if writing.is_symlink() or not re.fullmatch(r'\.tmp_ingest_[0-9a-f]{28}\.journal\.writing',writing.name):raise ValueError('INVALID_INGEST_JOURNAL')
+            writing.unlink()
+        for marker in self.path.glob('.tmp_ingest_*.journal'):
+            if marker.is_symlink() or marker.stat().st_size>4096:raise ValueError('INVALID_INGEST_JOURNAL')
+            record=json.loads(marker.read_text(encoding='utf-8'));sid=record['snapshot_id']
+            if (not re.fullmatch(r'[0-9a-f]{28}',sid) or marker.name!='.tmp_ingest_'+sid+'.journal'
+                or record['extension'] not in DocParser.EXTENSIONS
+                or any(not re.fullmatch(r'[0-9a-f]{64}',record[key]) for key in ('source_sha256','snapshot_sha256'))):
+                raise ValueError('INVALID_INGEST_JOURNAL')
+            target=self.path/(sid+'.json');source=self.originals/(sid+record['extension'])
+            if target.is_symlink() or source.is_symlink():raise ValueError('INVALID_INGEST_JOURNAL')
+            if target.exists():
+                if (sha256(target.read_bytes()).hexdigest()!=record['snapshot_sha256'] or not source.is_file()
+                    or sha256(source.read_bytes()).hexdigest()!=record['source_sha256']):
+                    raise ValueError('INGEST_JOURNAL_CONFLICT')
+            elif source.exists():
+                if sha256(source.read_bytes()).hexdigest()!=record['source_sha256']:raise ValueError('INGEST_JOURNAL_CONFLICT')
+                source.unlink()
+            marker.unlink()
 
     def _stamp_snapshot(self,sid):
         self._next_snapshot_epoch+=1
@@ -539,10 +566,17 @@ class DocumentStore:
             metadata['original_stored']=True
             content=json.dumps({'metadata':metadata,'blocks':blocks},ensure_ascii=False)
             with tempfile.NamedTemporaryFile(mode='wb',dir=self.originals,prefix='.tmp_',delete=False) as f:
-                f.write(data); tmp_source=Path(f.name)
+                f.write(data);f.flush();os.fsync(f.fileno());tmp_source=Path(f.name)
             with tempfile.NamedTemporaryFile(mode='w',dir=self.path,prefix='.tmp_',suffix='.json',delete=False,encoding='utf-8') as f:
-                f.write(content); tmp_metadata=Path(f.name)
+                f.write(content);f.flush();os.fsync(f.fileno());tmp_metadata=Path(f.name)
+            journal=self.path/('.tmp_ingest_'+sid+'.journal')
+            record={'snapshot_id':sid,'extension':suffix,'source_sha256':sha256(data).hexdigest(),
+                    'snapshot_sha256':sha256(content.encode('utf-8')).hexdigest()}
+            writing=journal.with_suffix('.journal.writing')
             try:
+                with writing.open('x',encoding='utf-8') as f:
+                    json.dump(record,f);f.flush();os.fsync(f.fileno())
+                os.replace(writing,journal)
                 os.replace(tmp_source,src_dest)
                 os.replace(tmp_metadata,target)
             except Exception:
@@ -551,6 +585,8 @@ class DocumentStore:
                 raise
             finally:
                 tmp_source.unlink(missing_ok=True);tmp_metadata.unlink(missing_ok=True)
+                writing.unlink(missing_ok=True)
+                if not src_dest.exists() or target.exists():journal.unlink(missing_ok=True)
             self.docs[sid]=metadata;self.blocks[sid]=blocks
             try:
                 self._rebuild()
@@ -757,6 +793,16 @@ class DocumentStore:
                 lex.sort(key=lambda h:(-h['score'],h['chunk']['chunk_id']))
                 dense.sort(key=lambda h:(-h['score'],h['chunk']['chunk_id']))
                 hits=fuse_rrf(lex,dense,limit=candidate_k*len(selected))
+        if self.reranker and not overview and knowledge_scope is None:
+            from .knowledge_scope import bounded_candidates
+            # A request's budget includes EVERY facet, not 64 pairs per call.
+            facets=plan.facets if mode=='answer' else plan.facets[:1]
+            original_hits=hits
+            for i,part in enumerate(facets):
+                budget=64//len(facets)+(i<64%len(facets))
+                facet_candidates[part]=(bounded_candidates(original_hits,frozenset(selected),budget)
+                    if len(original_hits)>budget else list(original_hits))
+            if len(hits)>64:hits=bounded_candidates(hits,frozenset(selected),64)
         rerank_trace=None
         proposed=plan.proposed_candidates(hits)
         capture=plan.policy=='shadow' and len(proposed)<len(hits)
@@ -768,7 +814,7 @@ class DocumentStore:
             capture_kw={'capture_scores':True} if capture else {}
             hits,rerank_trace=trace.call('rerank',self.reranker.rerank,plan.facets[0] if followup else question,rerank_candidates,trace=trace,**capture_kw)
             scored=rerank_trace.pop('_all_ranking',None)
-            if knowledge_scope is not None:rerank_trace['pair_budget']=64
+            rerank_trace['pair_budget']=64
             if capture:
                 from .query_plan import shadow_ranking
                 if scored is None:
@@ -872,7 +918,8 @@ class DocumentStore:
                 return {'status':'LLM_NOT_CONFIGURED','reason':'Set LLM_BASE_URL, LLM_MODEL and LLM_API_KEY explicitly',
                         'retriever':retriever,'llm_invoked':False}
             client=OpenAIChatClient(model=name,base_url=base,api_key=key,
-                                    output_mode=os.getenv('LLM_OUTPUT_MODE','json_schema'),trace=trace)
+                                    output_mode=os.getenv('LLM_OUTPUT_MODE','json_schema'),trace=trace,
+                                    timeout_s=self.llm_timeout_s)
             if mode=='answer':
                 from .generation import GroundedGenerator
                 names={r[0]:(r[1],r[2]) for r in knowledge_scope.labels} if knowledge_scope else {}

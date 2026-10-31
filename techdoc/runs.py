@@ -336,10 +336,13 @@ class RunService:
 
     def recover(self):
         self.queue.recover_expired()
-        with self.catalog.transaction() as conn:
-            rows=conn.execute('''SELECT r.id,j.state FROM runs r JOIN jobs j ON j.id=r.worker_job_id
+        query="""SELECT r.id,j.state FROM runs r JOIN jobs j ON j.id=r.worker_job_id
                 WHERE r.status IN ('queued','running','cancel_requested') AND j.state IN
-                ('cancelled','failed','interrupted') AND r.submission_owner_id=?''',(self.workspace_id,)).fetchall()
+                ('cancelled','failed','interrupted') AND r.submission_owner_id=?"""
+        with self.catalog.reader() as conn:
+            if conn.execute(query,(self.workspace_id,)).fetchone() is None:return 0
+        with self.catalog.transaction() as conn:
+            rows=conn.execute(query,(self.workspace_id,)).fetchall()
             for row in rows:
                 state='cancelled' if row['state']=='cancelled' else 'interrupted'
                 conn.execute('UPDATE runs SET status=?,finished_at=? WHERE id=?',(state,utc_now(),row['id']))
@@ -391,7 +394,17 @@ class RunService:
                 if not self.workspace.scope_valid(json.loads(row['scope_json']),conn=conn):cancel.set()
                 conn.execute("UPDATE runs SET status=CASE WHEN cancel_requested=1 THEN 'cancel_requested' ELSE 'running' END,started_at=? WHERE id=?",(utc_now(),run_id))
                 run=dict(row)
-            trace=QueryTrace(callback=lambda event:self._progress(run_id,event,cancel),cancel_event=cancel)
+            last_pair_at=float('-inf')
+            def progress(event):
+                nonlocal last_pair_at
+                if event.get('state')=='progress' and event.get('pairs_completed')!=event.get('pairs_total'):
+                    now=time.monotonic()
+                    if now-last_pair_at<2:return
+                    last_pair_at=now
+                # Stage transitions (especially provider started) and final
+                # counts are durable, even when intermediate pair counts merge.
+                self._progress(run_id,event,cancel)
+            trace=QueryTrace(callback=progress,cancel_event=cancel)
             scope=json.loads(run['scope_json'])
             result=self.store.query(run['resolved_question'] or run['question'],mode=scope.get('answer_mode','answer'),
                 knowledge_scope=KnowledgeQueryScope.from_resolved(scope),trace=trace,

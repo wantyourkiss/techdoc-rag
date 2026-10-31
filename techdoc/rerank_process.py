@@ -1,36 +1,86 @@
 """One private model process. Cancellation waits for its actual kernel to exit."""
 import json,os,queue,subprocess,sys,threading,time
+from collections import deque
 from pathlib import Path
 from uuid import uuid4
 from .diagnostics import QueryCancelled
 from .inference import inference_slot
 from .rerank_worker import MAX_MESSAGE
 
+RECOVERY_DELAY=2.0
+RECOVERY_WINDOW=300.0
+RECOVERY_ATTEMPTS=3
+
 
 class RerankProcess:
     def __init__(self,model_dir):
-        self.lock=threading.RLock();self.responses=queue.Queue(maxsize=4);self.closed=False
-        env=os.environ.copy();env['TECHDOC_RERANKER_MODEL']=model_dir
+        self.lock=threading.RLock();self.closed=True;self._shutdown=False
+        self.model_dir=model_dir;self.process=None;self.reader=None;self._reader_stop=None
+        self._state='starting';self._retry_at=0.;self._restarts=deque();self._generation=0
+        self._cache_stats={'enabled':False}
+        try:
+            with inference_slot(),self.lock:self._start()
+        except BaseException:self.close();raise
+
+    def _start(self,check=None):
+        env=os.environ.copy();env['TECHDOC_RERANKER_MODEL']=self.model_dir
         env['PYTHONPATH']=str(Path(__file__).resolve().parent.parent)+os.pathsep+env.get('PYTHONPATH','')
+        responses=queue.Queue(maxsize=4);stop=threading.Event()
+        self.responses=responses;self._reader_stop=stop
         self.process=subprocess.Popen([sys.executable,'-m','techdoc.rerank_worker'],stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,text=True,encoding='utf-8',env=env)
+        process=self.process
+        def deliver(value):
+            while not stop.is_set():
+                try:responses.put(value,timeout=.1);return
+                except queue.Full:pass
         def read():
             try:
-                while True:
-                    line=self.process.stdout.readline(MAX_MESSAGE+1)
+                while not stop.is_set():
+                    line=process.stdout.readline(MAX_MESSAGE+1)
                     if not line or len(line)>MAX_MESSAGE:break
-                    self.responses.put(json.loads(line))
+                    deliver(json.loads(line))
             except Exception:pass
-            finally:self.responses.put(None)
+            finally:deliver(None)
         self.reader=threading.Thread(target=read,daemon=True);self.reader.start()
         try:
-            ready=self.responses.get(timeout=180)
+            deadline=time.monotonic()+180
+            while True:
+                if check:check()
+                if time.monotonic()>deadline:raise RuntimeError('RERANK_PROCESS_UNAVAILABLE')
+                try:ready=responses.get(timeout=.1);break
+                except queue.Empty:continue
             if not ready or ready.get('ready') is not True:raise RuntimeError('RERANK_PROCESS_UNAVAILABLE')
+            if self._generation and (ready['cache_identity']!=self._stable_cache_identity or ready['model_id']!=self.model_id):
+                raise RuntimeError('RERANK_RECOVERY_IDENTITY_CHANGED')
             self.model_id=ready['model_id'];self.max_length=ready['max_length'];self.batch_size=ready['batch_size']
             self._stable_cache_identity=ready['cache_identity']
             self._cache_stats=ready.get('cache_stats',{'enabled':False})
             self.quantized_engine=ready.get('quantized_engine');self.cpu_threads=ready.get('cpu_threads')
-        except BaseException:self.close();raise
+            if check:check()
+            self._generation+=1;self.closed=False;self._state='ready';self._retry_at=0.
+        except BaseException:self._stop_worker();raise
+
+    def _broken(self):
+        self.closed=True;self._state='unavailable';self._retry_at=time.monotonic()+RECOVERY_DELAY
+        self._stop_worker()
+
+    def _ensure_available(self,check,trace):
+        if self._shutdown:raise RuntimeError('RERANK_PROCESS_CLOSED')
+        if not self.closed and self.process.poll() is None:return
+        if not self.closed:self._broken()
+        now=time.monotonic()
+        while self._restarts and self._restarts[0]<=now-RECOVERY_WINDOW:self._restarts.popleft()
+        if len(self._restarts)>=RECOVERY_ATTEMPTS:
+            self._retry_at=max(self._retry_at,self._restarts[0]+RECOVERY_WINDOW)
+        if now<self._retry_at:raise RuntimeError('RERANK_RECOVERY_BACKOFF')
+        if check:check()
+        self._restarts.append(now);self._state='recovering'
+        try:
+            if trace:trace.call('rerank_recovery',self._start,check)
+            else:self._start(check)
+        except BaseException:
+            self._broken();raise
 
     def _send(self,value):
         raw=json.dumps(value,ensure_ascii=False,allow_nan=False)+'\n'
@@ -40,7 +90,7 @@ class RerankProcess:
     def rerank(self,question,hits,*,per_snapshot=5,trace=None,capture_scores=False):
         check=trace.check_cancelled if trace else None
         with inference_slot(check),self.lock:
-            if self.closed:raise RuntimeError('RERANK_PROCESS_CLOSED')
+            self._ensure_available(check,trace)
             if trace and not trace.pairs_planned:trace.begin_pairs(len(hits));trace.pairs_planned=False
             ident=uuid4().hex;cancelled=False;deadline=time.monotonic()+600
             offset=(getattr(trace,'pairs_completed',0),getattr(trace,'pairs_cached',0),getattr(trace,'pairs_scored',0));last=(0,0,0)
@@ -76,22 +126,33 @@ class RerankProcess:
             except QueryCancelled:raise
             except BaseException:
                 # EOF/timeouts cannot release the parent's permit while an orphan kernel runs.
-                self.close();raise
+                self._broken();raise
 
     def cache_stats(self):
         # Last completed worker response; no RPC or model lock on capabilities reads.
-        return {**self._cache_stats,'worker_available':not self.closed and self.process.poll() is None,
+        process=self.process
+        available=not self.closed and process is not None and process.poll() is None
+        return {**self._cache_stats,'worker_available':available,
+                'worker_state':self._state if available or self._state!='ready' else 'unavailable',
+                'worker_generation':self._generation,'recovery_attempts_in_window':len(self._restarts),
+                'retry_after_seconds':max(0,round(self._retry_at-time.monotonic(),1)),
                 'observation':'last_worker_response'}
 
     def close(self):
         with self.lock:
-            if self.closed:return
-            self.closed=True
-            if self.process.poll() is None:
-                try:self._send({'op':'stop'});self.process.wait(timeout=3)
-                except Exception:
-                    self.process.kill();self.process.wait()
-            for stream in (self.process.stdin,self.process.stdout):
-                if stream:
-                    try:stream.close()
-                    except OSError:pass  # A confirmed-dead worker may leave a broken pipe.
+            if self._shutdown:return
+            self._shutdown=True;self.closed=True;self._state='closed';self._stop_worker()
+
+    def _stop_worker(self):
+        process=self.process
+        if process is None:return
+        if process.poll() is None:
+            try:self._send({'op':'stop'});process.wait(timeout=3)
+            except Exception:
+                process.kill();process.wait()
+        if self._reader_stop:self._reader_stop.set()
+        for stream in (process.stdin,process.stdout):
+            if stream:
+                try:stream.close()
+                except OSError:pass
+        if self.reader:self.reader.join(timeout=1)

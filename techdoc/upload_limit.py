@@ -2,6 +2,7 @@
 from .core import MAX_BYTES
 from .knowledge_api import error_response
 from starlette.formparsers import MultiPartException
+import re
 
 
 class UploadBodyTooLarge(MultiPartException):
@@ -12,7 +13,9 @@ class KnowledgeUploadLimit:
     def __init__(self,app): self.app=app
 
     async def __call__(self,scope,receive,send):
-        if scope['type']!='http' or scope['method'] not in ('POST','PATCH') or not scope['path'].startswith('/api/v1/'):
+        if (scope['type']!='http' or scope['method'] not in ('POST','PATCH') or
+            not (scope['path'].startswith('/api/v1/') or scope['path']=='/documents'
+                 or re.fullmatch(r'/documents/[^/]+/revisions',scope['path']))):
             return await self.app(scope,receive,send)
         limit=MAX_BYTES+64*1024; size=0; exceeded=False; replaced=False
         from starlette.requests import Request

@@ -84,13 +84,6 @@ class ImportService:
     def _storage_size(self):
         return sum(p.stat().st_size for p in self.catalog.data_dir.rglob('*') if p.is_file() and not p.is_symlink())
 
-    def by_request(self,kb_id,request_key):
-        with self.catalog.reader() as conn:
-            self.catalog.require_kb(conn,kb_id,workspace_id=self.workspace_id)
-            row=conn.execute("SELECT id FROM jobs WHERE kb_id=? AND kind='import' AND request_key=?",(kb_id,request_key)).fetchone()
-            if not row:raise CatalogError('IMPORT_SUBMISSION_NOT_FOUND',status=404)
-        return self.get(row['id'])
-
     def _input_path(self,row):
         expected = 'staging/'+row['id']+'/source'
         path = self.catalog.data_dir/row['staged_path']

@@ -43,7 +43,17 @@ class JobQueue:
     def claim(self, *, lease_seconds=60, kind=None,parallel_query_limit=1):
         if not 1 <= lease_seconds <= 3600:
             raise ValueError('Invalid lease duration')
+        with self.catalog.reader() as conn:
+            if self._claimable(conn,kind,parallel_query_limit) is None:return None
         with self.catalog.transaction() as conn:
+            job=self._claimable(conn,kind,parallel_query_limit)
+            if job is None:return None
+            token = new_id('lease')
+            conn.execute("UPDATE jobs SET state='running',stage='starting',lease_token=?,lease_until=?,updated_at=? WHERE id=?",
+                         (token,time.time()+lease_seconds,utc_now(),job['id']))
+            return dict(conn.execute('SELECT * FROM jobs WHERE id=?', (job['id'],)).fetchone())
+
+    def _claimable(self,conn,kind,parallel_query_limit):
             active=conn.execute("SELECT kind FROM jobs WHERE state IN ('running','cancel_requested')").fetchall()
             shared=enabled() and kind in ('import','query')
             if shared:
@@ -57,10 +67,7 @@ class JobQueue:
                 ORDER BY j.created_at,j.id LIMIT 1''', (self.workspace_id,)).fetchone()
             if not job or (kind is not None and job['kind']!=kind):
                 return None
-            token = new_id('lease')
-            conn.execute("UPDATE jobs SET state='running',stage='starting',lease_token=?,lease_until=?,updated_at=? WHERE id=?",
-                         (token,time.time()+lease_seconds,utc_now(),job['id']))
-            return dict(conn.execute('SELECT * FROM jobs WHERE id=?', (job['id'],)).fetchone())
+            return job
 
     def renew(self, job_id, lease_token, *, stage=None, lease_seconds=120):
         if not 1<=lease_seconds<=3600:
@@ -108,10 +115,12 @@ class JobQueue:
             return dict(conn.execute('SELECT * FROM jobs WHERE id=?', (job_id,)).fetchone())
 
     def recover_expired(self):
+        query="""SELECT j.* FROM jobs j JOIN knowledge_bases k ON k.id=j.kb_id
+                WHERE j.state IN ('running','cancel_requested') AND j.lease_until<? AND k.workspace_id=?"""
+        with self.catalog.reader() as conn:
+            if conn.execute(query,(time.time(),self.workspace_id)).fetchone() is None:return 0
         with self.catalog.transaction() as conn:
-            rows = conn.execute('''SELECT j.* FROM jobs j JOIN knowledge_bases k ON k.id=j.kb_id
-                WHERE j.state IN ('running','cancel_requested') AND j.lease_until<? AND k.workspace_id=?''',
-                                (time.time(),self.workspace_id)).fetchall()
+            rows = conn.execute(query,(time.time(),self.workspace_id)).fetchall()
             for row in rows:
                 state = 'cancelled' if row['cancel_requested'] else 'interrupted'
                 conn.execute('UPDATE jobs SET state=?,stage=?,updated_at=? WHERE id=?', (state,state,utc_now(),row['id']))

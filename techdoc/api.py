@@ -38,6 +38,8 @@ class PlanInspectionBody(QueryBody):
 def create_app(data_dir: str | Path | None = None, *, knowledge_mode=None, import_worker=True,query_worker=None) -> FastAPI:
     from .auth_config import browser_access
     access=browser_access()  # Fail before acquiring the owner, touching files or loading models.
+    from .auth_throttle import AuthThrottle
+    auth_throttle=AuthThrottle(os.getenv('TECHDOC_PROXY_AUTH_TOKEN',''))
     root=Path(data_dir or os.getenv('TECHDOC_DATA_DIR','./runtime_data')).resolve()
     flag=os.getenv('TECHDOC_KNOWLEDGE_MODE','0')
     if flag not in ('0','1'):raise RuntimeError('INVALID_KNOWLEDGE_MODE')
@@ -99,8 +101,8 @@ def create_app(data_dir: str | Path | None = None, *, knowledge_mode=None, impor
     if knowledge_mode:
         from .knowledge_api import install_knowledge_api
         install_knowledge_api(app,workspace,imports,runs,studio)
-        from .upload_limit import KnowledgeUploadLimit
-        app.add_middleware(KnowledgeUploadLimit)
+    from .upload_limit import KnowledgeUploadLimit
+    app.add_middleware(KnowledgeUploadLimit)
     query_slots=threading.BoundedSemaphore(max(1,min(8,int(os.getenv('TECHDOC_QUERY_CAPACITY','2')))))
     from .diagnostics import QueryTrace,QueryCancelled
     query_logger=logging.getLogger('techdoc.query')
@@ -127,9 +129,13 @@ def create_app(data_dir: str | Path | None = None, *, knowledge_mode=None, impor
             return JSONResponse({'code':'LOCAL_ACCESS_ONLY','message':'匿名模式仅允许本机直接访问。',
                                  'retryable':False},status_code=403,headers={'Cache-Control':'no-store'})
         if browser_password:
+            source=auth_throttle.source(request);retry_after=auth_throttle.retry_after(source)
+            if retry_after:
+                return JSONResponse({'code':'LOGIN_RATE_LIMITED','message':'登录失败次数较多，请稍后再试。','retryable':True},
+                    status_code=429,headers={'Retry-After':str(retry_after),'Cache-Control':'no-store'})
             valid = False
             scheme, _, token = request.headers.get('authorization', '').partition(' ')
-            if scheme.lower() == 'basic':
+            if scheme.lower() == 'basic' and len(token)<=8192:
                 try:
                     decoded = base64.b64decode(token, validate=True).decode('utf-8')
                     username, _, password = decoded.partition(':')
@@ -138,6 +144,9 @@ def create_app(data_dir: str | Path | None = None, *, knowledge_mode=None, impor
                 except (ValueError, UnicodeError, binascii.Error):
                     pass
             if not valid:
+                # Missing credentials initiate the normal browser challenge; they
+                # are not failed password guesses and must not consume quota.
+                if request.headers.get('authorization'):auth_throttle.failure(source)
                 payload=({'code':'LOGIN_REQUIRED','message':'请登录后继续。','retryable':False,
                           'request_id':secrets.token_hex(16)} if knowledge_mode and request.url.path.startswith('/api/v1')
                          else {'detail':'Login required'})
@@ -165,7 +174,12 @@ def create_app(data_dir: str | Path | None = None, *, knowledge_mode=None, impor
         return response
 
     @app.get('/health')
-    def health():
+    def health(response: Response):
+        stats=store.reranker.cache_stats() if callable(getattr(store.reranker,'cache_stats',None)) else {}
+        ready=store.retrieval_ready and stats.get('worker_available',True)
+        if access.mode=='public':
+            if not ready:response.status_code=503
+            return {'status':'ready' if ready else 'unavailable'}
         return {'status':'local_demo_ready' if store.retrieval_ready else 'index_unavailable',
                 'retriever':{'bm25':'BM25_LOCAL_DEMO','dense':'DENSE_QDRANT_LOCAL','hybrid':'HYBRID_RRF_LOCAL'}[store.retriever_mode],
                 'dense_runtime_enabled':store.retriever_mode in ('dense','hybrid'),
@@ -244,10 +258,14 @@ def create_app(data_dir: str | Path | None = None, *, knowledge_mode=None, impor
 
     @app.get('/documents/{snapshot_id}/source')
     def download_source(snapshot_id: str):
-        p=store.source_path(snapshot_id)
-        if p is None:raise HTTPException(status_code=404,detail='ORIGINAL_SOURCE_NOT_AVAILABLE')
+        with store.lock:
+            p=store.source_path(snapshot_id)
+            if p is None:raise HTTPException(status_code=404,detail='ORIGINAL_SOURCE_NOT_AVAILABLE')
+            try:data=p.read_bytes();filename=store.docs[snapshot_id]['filename']
+            except (OSError,KeyError):raise HTTPException(status_code=404,detail='ORIGINAL_SOURCE_NOT_AVAILABLE') from None
         # Attachment disposition: uploaded HTML/PDF never executes as this app's origin.
-        return FileResponse(p,filename=store.docs[snapshot_id]['filename'],media_type='application/octet-stream')
+        disposition=FileResponse(p,filename=filename).headers['content-disposition']
+        return Response(data,media_type='application/octet-stream',headers={'Content-Disposition':disposition})
 
     def validate_query(body):
         if body.mode not in ('evidence_only','llm','answer'):
@@ -377,8 +395,12 @@ def create_app(data_dir: str | Path | None = None, *, knowledge_mode=None, impor
     @app.get('/',response_class=HTMLResponse)
     def home():
         path=Path(__file__).parent/'static'/('workspace.html' if knowledge_mode else 'index.html')
-        return HTMLResponse(path.read_text(encoding='utf-8'),headers={
-            'Content-Security-Policy':"default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'"})
+        text=path.read_text(encoding='utf-8');scripts="'self'"
+        if not knowledge_mode:
+            nonce=secrets.token_urlsafe(24);text=text.replace('<script>','<script nonce="'+nonce+'">')
+            scripts+=" 'nonce-"+nonce+"'"
+        return HTMLResponse(text,headers={
+            'Content-Security-Policy':"default-src 'none'; style-src 'self' 'unsafe-inline'; script-src "+scripts+"; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'"})
 
     return app
 

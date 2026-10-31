@@ -98,7 +98,8 @@ class ScoreCache:
         with self.lock:
             item=self.data.get(key)
             if item is None:return None
-            self.data.move_to_end(key);self.dirty=True;return item['score']
+            # Access order matters in memory, not for persisted score validity.
+            self.data.move_to_end(key);return item['score']
 
     def put(self,key,score,chunk):
         if not self.capacity:return

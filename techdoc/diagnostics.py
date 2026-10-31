@@ -5,7 +5,7 @@ from time import perf_counter
 from uuid import uuid4
 
 LABELS={'queue':'等待处理','lexical_retrieval':'检索文档','dense_retrieval':'检索相关内容',
-        'rerank':'筛选相关资料','context_build':'整理原文依据','evidence_gate':'校验原文',
+        'rerank':'筛选相关资料','rerank_recovery':'正在恢复资料筛选服务','context_build':'整理原文依据','evidence_gate':'校验原文',
         'generation':'生成回答','support_review':'核对回答依据','claim_review':'核对回答依据',
         'query_plan':'选择检索策略','query_plan_shadow':'比较检索策略',
         'query_embedding':'理解查询内容','dense_search':'检索相关内容',

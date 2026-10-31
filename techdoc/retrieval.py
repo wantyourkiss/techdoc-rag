@@ -12,6 +12,7 @@ import os
 import re
 import json
 import hashlib
+import tempfile
 from pathlib import Path
 from time import perf_counter
 from uuid import NAMESPACE_URL, uuid5,uuid4
@@ -380,10 +381,16 @@ class DenseQdrantLocal:
         self.cache={k:v for k,v in self.cache.items() if k in active}
         if self.cache_path:
             self.cache_path.parent.mkdir(parents=True,exist_ok=True)
-            temp=self.cache_path.with_suffix('.tmp')
-            temp.write_text(json.dumps({'identity':self.cache_identity,'vectors':self.cache}))
-            os.chmod(temp,0o600)
-            os.replace(temp,self.cache_path)
+            temp=None
+            try:
+                with tempfile.NamedTemporaryFile(mode='w',encoding='utf-8',dir=self.cache_path.parent,
+                        prefix='.tmp_embedding_',delete=False) as f:
+                    temp=Path(f.name);os.chmod(temp,0o600)
+                    json.dump({'identity':self.cache_identity,'vectors':self.cache},f)
+                    f.flush();os.fsync(f.fileno())
+                os.replace(temp,self.cache_path)
+            finally:
+                if temp is not None:temp.unlink(missing_ok=True)
 
     def fork_for_chunks(self,chunks):
         """New data/client, same encoder/tokenizer weights and verified cached vectors."""

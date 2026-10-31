@@ -22,6 +22,8 @@ services:
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_OUTPUT_MODE: ${LLM_OUTPUT_MODE:-json_schema}
+      LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-30}
+      TECHDOC_PROXY_AUTH_TOKEN: ${TECHDOC_PROXY_AUTH_TOKEN:-}
     volumes:
       - rag_data:/data
     read_only: true
