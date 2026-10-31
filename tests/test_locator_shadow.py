@@ -71,3 +71,9 @@ def test_context_summary_exposes_counts_not_proposed_quotes_or_ids():
     summary=compare_context({'applied_to_answer':False},first,second,BLOCKS,{'a'})
     assert summary['context_changed'] and not summary['required_sources_preserved']
     assert 'PRIVATE' not in json.dumps(summary) and 'OTHER' not in json.dumps(summary)
+
+
+def test_preview_block_details_count_actual_source_coverage():
+    summary=compare_context({},[{'block_id':'p1'},{'block_id':'p8'}],[{'block_id':'b3'}],BLOCKS,{'a'})
+    assert summary['baseline_source_count']==summary['proposed_source_count']==1
+    assert not summary['required_sources_preserved']

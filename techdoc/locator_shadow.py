@@ -135,7 +135,9 @@ def compare_context(summary,baseline,proposed,blocks,required=frozenset()):
     # Only aggregate diagnostics are persisted. Proposed quotes/spans are never
     # published as answer citations, and are never supplied to the model.
     def sources(details):
-        return {blocks[span['block_id']]['snapshot_id'] for d in details for span in d.get('source_spans',[]) if span['block_id'] in blocks}
+        identifiers={span['block_id'] for d in details for span in d.get('source_spans',[])}
+        identifiers.update(d['block_id'] for d in details if d.get('block_id'))
+        return {blocks[ident]['snapshot_id'] for ident in identifiers if ident in blocks}
     value=dict(summary)
     actual=sources(baseline);alternative=sources(proposed)
     value.update(context_changed=baseline!=proposed,
