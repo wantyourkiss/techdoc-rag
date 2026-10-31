@@ -1,4 +1,5 @@
-FROM python:3.11-slim AS base
+ARG PYTHON_IMAGE=python:3.11-slim
+FROM ${PYTHON_IMAGE} AS base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TECHDOC_DATA_DIR=/data
 WORKDIR /app
 COPY requirements-minimal.txt requirements-dense.txt ./

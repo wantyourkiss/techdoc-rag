@@ -43,9 +43,25 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 
 
 class ProviderError(RuntimeError):
-    def __init__(self, category: str):
+    def __init__(self, category: str, *, failure_kind=None):
         super().__init__(category)
         self.category = category
+        from .provider_status import category_kind,KINDS
+        self.failure_kind=failure_kind if isinstance(failure_kind,str) and failure_kind in KINDS else category_kind(category)
+
+
+def _http_failure_kind(error):
+    from .provider_status import category_kind
+    kind=category_kind('PROVIDER_HTTP_'+str(error.code))
+    if error.code==429:
+        try:
+            raw=error.read(8193)
+            value=json.loads(raw) if len(raw)<=8192 else {}
+            detail=value.get('error',{}) if isinstance(value,dict) else {}
+            if isinstance(detail,dict) and (detail.get('type')=='GoUsageLimitError' or detail.get('code')=='insufficient_quota'):
+                kind='quota'
+        except Exception:pass
+    return kind
 
 
 class ModelClient(Protocol):
@@ -112,11 +128,13 @@ class OpenAIChatClient:
                 return json.loads(content)
             except HTTPError as e:
                 # Do not echo provider error body (may include sensitive snippets).
-                if e.code in (429, 500, 502, 503, 504) and attempt < self.max_retries:
+                kind=_http_failure_kind(e)
+                e.close()
+                if kind!='quota' and e.code in (429, 500, 502, 503, 504) and attempt < self.max_retries:
                     
                     if self.trace:self.trace.count('provider_retries')
                     time.sleep(0.2 * (2 ** attempt)); continue
-                raise ProviderError('PROVIDER_HTTP_' + str(e.code)) from None
+                raise ProviderError('PROVIDER_HTTP_' + str(e.code),failure_kind=kind) from None
             except (URLError, socket.timeout, TimeoutError, ConnectionError, RemoteDisconnected, IncompleteRead):
                 if attempt < self.max_retries:
                     

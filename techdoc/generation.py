@@ -6,6 +6,7 @@ from hashlib import sha256
 from copy import deepcopy
 from time import perf_counter
 from .fact_guard import contradiction
+from .provider_status import public_failure,failure_message
 
 from .s3b_generator import validate_model_json,OUTPUT_SCHEMA
 
@@ -299,8 +300,9 @@ class GroundedGenerator:
         except Exception as exc:
             from .diagnostics import QueryCancelled
             if isinstance(exc,QueryCancelled):raise
-            if self.trace:self.trace.error('generation',getattr(exc,'category','GENERATION_FAILED'))
-            return result('ABSTAIN_PROVIDER_FAILURE', 'Generation provider failed')
+            failure=public_failure(exc,'generation')
+            if self.trace:self.trace.error('generation','PROVIDER_'+failure['kind'].upper())
+            return result('ABSTAIN_PROVIDER_FAILURE',failure_message(failure),provider_failure=failure)
         try:
             supports=None
             if self.policy['name'] in ('anchored_v3','anchored_v4','anchored_v5_exp'):
@@ -347,7 +349,8 @@ class GroundedGenerator:
             except Exception as exc:
                 from .diagnostics import QueryCancelled
                 if isinstance(exc,QueryCancelled):raise
-                return result('ABSTAIN_PROVIDER_FAILURE','逐条复核未完成。')
+                failure=public_failure(exc,'claim_review')
+                return result('ABSTAIN_PROVIDER_FAILURE',failure_message(failure),provider_failure=failure)
             try:indices=retained_indices(verdict,len(claims))
             except (ValueError,TypeError):return result('ABSTAIN_INVALID_REVIEW','逐条复核格式或依赖关系无效。')
             if not indices:return result('ABSTAIN_SUPPORT_REVIEW','没有通过依据复核的主张。')
@@ -369,8 +372,9 @@ class GroundedGenerator:
         except Exception as exc:
             from .diagnostics import QueryCancelled
             if isinstance(exc,QueryCancelled):raise
-            if self.trace:self.trace.error('support_review',getattr(exc,'category','REVIEW_FAILED'))
-            return result('ABSTAIN_PROVIDER_FAILURE', 'Support review provider failed')
+            failure=public_failure(exc,'support_review')
+            if self.trace:self.trace.error('support_review','PROVIDER_'+failure['kind'].upper())
+            return result('ABSTAIN_PROVIDER_FAILURE',failure_message(failure),provider_failure=failure)
         try:
             review_status, reviewed, review_reason = validate_grounded_json(review)
         except ValueError:

@@ -60,10 +60,17 @@ python -m scripts.audit_catalog --data-dir /path/to/runtime_data
 
 ## 验证与边界
 
-2026-10-31 完整工程回归：NAS Python 663 项通过、策略专项 58 项通过；Node 78 项通过。本仓库只保留部署文件和最小启动冒烟脚本，不包含完整工程测试/语料。依赖范围由 requirements 定义，具体目标主机仍应验证。
+公开仓库保留最小部署、合成回归子集及 GitHub Actions 验证流程；完整工程测试和真实语料不在本仓库。依赖范围由 requirements 定义，具体目标主机仍应验证。
 
 ```bash
 python scripts/smoke_minimal.py
+python -m scripts.evaluate_regression --output-dir /tmp/rag-regression
+# 需要安装 pytest，以下测试不调用外部模型
+python -m pytest tests -q
 ```
+
+统一回归包括 80 条模型替身回答合同用例和 3 条实际 BM25 合成定位用例，记录源码身份与策略，输出 JSON/Markdown 并在错误时返回非零退出码。未测的真实 Dense 质量、真实生成准确率和人工 Gold 明确留空。
+
+模型限额、频率、网络、认证与格式异常分别显示；“只查原文”会保护已有草稿，回填原问题并切换模式，由用户确认发送。系统不会因模型额度不足静默更换模型或发布未审核草稿。
 
 引用逐字核验和模型复核不等于事实保证。针对明确数值绑定、单位、否定、条件和范围矛盾有保守自动防护；未知改写仍可能出错，关键结论应核对引用。48 条模型替身对抗用例通过，不代表真实模型准确率或独立人工 Gold。解析以文本为主，不保证扫描件 OCR、复杂图表或图片事实。物理历史回收、资源自动重排队和多租户功能未提供。

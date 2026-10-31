@@ -1,5 +1,11 @@
 /* Durable runs: navigation, reconnect and refresh never replay a message POST. */
-window.WorkspaceConversation={create(o){
+window.WorkspaceConversation={outcome(result){
+ const messages={quota:['模型用量已达上限','大模型服务的用量已达上限。可待额度恢复后重试，或选择只查原文。'],rate_limit:['模型调用受限','大模型服务暂时限制调用频率。请稍后重试，或选择只查原文。'],network:['模型连接未完成','大模型服务连接超时或中断。可稍后重试，或选择只查原文。'],authentication:['模型认证未通过','请检查后端大模型密钥配置；也可选择只查原文。'],access_denied:['模型访问受限','请检查后端模型配置和服务权限；也可选择只查原文。'],unavailable:['模型服务暂不可用','大模型服务暂不可用。可稍后重试，或选择只查原文。'],invalid_response:['模型回复未通过检查','大模型返回内容未通过格式或完整性检查。可重试，或选择只查原文。'],unknown:['模型处理未完成','大模型处理未完成。可稍后重试，或选择只查原文。']};
+ if(result?.status==='ABSTAIN_PROVIDER_FAILURE'){const kind=result.provider_failure?.kind,pair=Object.hasOwn(messages,kind)?messages[kind]:messages.unknown;return {label:pair[0],reason:pair[1]};}
+ if(result?.status==='ABSTAIN_FACT_CONTRADICTION')return {label:'回答依据存在冲突',reason:'回答中的事实关系未通过引用检查。可查看原文核对，或调整问题后重试。'};
+ if(result?.status==='ABSTAIN_CONTEXT_BUDGET')return {label:'本次资料范围过大',reason:'本次上下文超过处理范围。请减少所选资料或缩小问题范围后重试。'};
+ return {label:'需要补充依据',reason:null};
+},create(o){
  'use strict';
  const $=id=>document.getElementById(id),M=window.WorkspaceModel;
  const done=new Set(['succeeded','abstained','failed','cancelled','interrupted']);
@@ -30,7 +36,7 @@ window.WorkspaceConversation={create(o){
   if(run.status==='cancel_requested')return '正在确认停止状态…';
   return vm?.stage||(run.status==='queued'?'等待处理…':'正在处理资料…');
  }
- async function editQuestion(run){
+ async function editQuestion(run,mode=null){
   if(!canEdit())return;
   const t=owner(),revision=vm.localRevision;
   if($('question').value.trim()){o.notice('已有问题草稿，已保留。请先复制、发送或清空草稿，再重新编辑。');$('question').focus();return;}
@@ -38,16 +44,16 @@ window.WorkspaceConversation={create(o){
   if(!original){const page=await o.api('/sessions/'+t.sessionId+'/messages?around_run_id='+encodeURIComponent(run.id));original=page.items.find(m=>m.role==='user'&&m.run_id===run.id);}
   if(!owns(t)||vm.localRevision!==revision||!canEdit()||$('question').value.trim())return;
   if(!original?.body){o.notice('未找到原问题，请加载对应的历史消息后复制问题。');return;}
-  $('question').value=original.body;vm.draft=original.body;vm.localRevision++;context().view.draft=original.body;persist();scopeChanged();$('question').focus();
-  $('chat-status').textContent='问题已回填，尚未提交。发送时使用当前所选资料；追问请补全具体对象。';
+  $('question').value=original.body;vm.draft=original.body;vm.localRevision++;context().view.draft=original.body;if(mode==='evidence_only')$('answer-mode').value=mode;persist();scopeChanged();$('question').focus();
+  $('chat-status').textContent=mode==='evidence_only'?'已切换为只查原文并回填问题，尚未提交。发送时使用当前所选资料。':'问题已回填，尚未提交。发送时使用当前所选资料；追问请补全具体对象。';
  }
  function selectMode(){const caps=context().capabilities||{};$('answer-mode').options[0].disabled=!caps.generative_answer_enabled;if(!caps.generative_answer_enabled)$('answer-mode').value='evidence_only';}
  function scopeChanged(){if(!context().view)return;const c=context(),count=M.selected(c.view,c.documents).length,readonly=c.kb?.state!=='active',busy=!ready||sending||!!(vm?.activeRunId||vm?.pending);$('send-chat').disabled=readonly||!count||busy||!$('question').value.trim()||c.authPaused||($('compare-sources').checked&&(count<2||count>4));$('new-chat').disabled=readonly||!ready||sending;$('rename-chat').disabled=readonly||!ready||sending||!session;$('history-chat').disabled=!ready||sending;$('compare-sources').disabled=readonly;$('stop-chat').hidden=!vm?.activeRunId;$('recover-chat').hidden=!vm?.pending;$('question').readOnly=readonly;for(const b of editButtons)b.disabled=!canEdit();if($('compare-sources').checked&&(count<2||count>4))$('chat-status').textContent='对比需要选择 2～4 份资料。';}
  async function refreshMessages(){const t=owner(),k=t.kb,s=t.sessionId;if(!s)return;const data=await o.api('/sessions/'+s+'/messages');if(!owns(t))return;messages=data.items;before=data.next_before;session.revision=data.session_revision;session.last_message_id=data.last_message_id;const pending=messages.find(m=>m.role==='assistant'&&!done.has(m.run.status));if(pending&&vm.activeRunId!==pending.run_id){if(vm.progress?.id!==pending.run_id){vm.stage='';vm.progress=null;}vm.connection='connecting';vm.activeRunId=pending.run_id;persist();subscribe(vm.activeRunId);}render();}
  function textWithCitations(parent,text,extracts,run){const lookup=new Map(extracts.map(e=>[e.evidence_key,e]));let pos=0;for(const match of text.matchAll(/\[(E\d+)\]/g)){parent.append(document.createTextNode(text.slice(pos,match.index)));const source=lookup.get(match[1]);if(source){const b=o.button('['+match[1]+']',()=>o.openCitation(source.citation_id,{sessionId:run.session_id}),'citation-link');parent.append(b);}else parent.append(document.createTextNode(match[0]));pos=match.index+match[0].length;}parent.append(document.createTextNode(text.slice(pos)));}
- function reason(result){if(result?.reason&&/[\u4e00-\u9fff]/.test(result.reason))return result.reason;return '资料中的依据不足，或本次处理未完成。可以调整资料范围或补充问题。';}
+ function reason(result){const safe=window.WorkspaceConversation.outcome(result);if(safe.reason)return safe.reason;if(result?.reason&&/[\u4e00-\u9fff]/.test(result.reason))return result.reason;return '资料中的依据不足，或本次处理未完成。可以调整资料范围或补充问题。';}
  function render(){stopWait();editButtons=[];const root=$('messages'),panel=$('messages'),nearBottom=panel.scrollHeight-panel.scrollTop-panel.clientHeight<100,oldScroll=panel.scrollTop;root.replaceChildren();$('chat-welcome').hidden=messages.length>0;$('messages').hidden=messages.length===0;$('older-messages').hidden=before===null;$('older-messages').disabled=!!(olderPending&&owns(olderPending.owner));o.onMessages?.(kb+':'+(session?.id||'new'),messages.length>0);$('session-title').textContent=session?.title||'新对话';
-  for(const message of messages){const card=o.el('article','',{class:'chat-message '+message.role});card.dataset.message=message.id;if(message.role==='user'){card.append(o.el('p',message.body));root.append(card);continue;}const run=message.run,result=run.result;card.dataset.run=run.id;card.append(o.el('p',done.has(run.status)?(run.status==='succeeded'?(result?.status==='GENERATED_ANSWER'?'已生成 · 模型复核通过':'原文摘录'):({cancelled:'已停止',interrupted:'任务已中断',failed:'处理未完成',abstained:'需要补充依据'})[run.status]):'正在处理',{class:'answer-label'}));
+  for(const message of messages){const card=o.el('article','',{class:'chat-message '+message.role});card.dataset.message=message.id;if(message.role==='user'){card.append(o.el('p',message.body));root.append(card);continue;}const run=message.run,result=run.result;card.dataset.run=run.id;card.append(o.el('p',done.has(run.status)?(run.status==='succeeded'?(result?.status==='GENERATED_ANSWER'?'已生成 · 模型复核通过':'原文摘录'):run.status==='abstained'?window.WorkspaceConversation.outcome(result).label:({cancelled:'已停止',interrupted:'任务已中断',failed:'处理未完成'})[run.status]):'正在处理',{class:'answer-label'}));
    if(!done.has(run.status)){const clock=o.el('p','',{class:'wait-elapsed',role:'timer','aria-live':'off'});waitNodes.push({node:clock,run});card.append(o.el('p',connectionLabel(run),{class:'muted'}),clock);const pairs=vm?.progress?.pairs;if(pairs&&vm.progress.id===run.id)card.append(o.el('p',`已处理 ${pairs.done}/${pairs.total} 对候选（缓存 ${pairs.cached}，实际评分 ${pairs.scored}）`,{class:'rerank-count'}));card.append(o.el('p','全新问题首次处理可能需要数十秒。可继续阅读资料，或停止本次任务。',{class:'hint'}));}
    else if(run.source_state==='revoked'){card.append(o.el('p','回答关联的资料已移除，内容暂不可查看。',{class:'hint'}));}
     else if(result){if(run.status==='succeeded'&&result.safe_output){const body=o.el('div','',{class:'answer-body'});textWithCitations(body,result.safe_output,result.source_extracts||[],run);card.append(body);}else card.append(o.el('p',reason(result)));
@@ -56,6 +62,7 @@ window.WorkspaceConversation={create(o){
      if(result.safe_output&&run.status==='succeeded'){if(result.status==='GENERATED_ANSWER')card.append(o.el('p','引用已核对原文；回答由模型生成和复核，未经人工审核。关键结论与数值请结合引用核对。',{class:'answer-disclosure'}));const actions=o.el('div','',{class:'answer-actions'});actions.append(o.button('复制',()=>o.copyText(result.safe_output)),o.button('保存为笔记',()=>o.collect(run)));card.append(actions);}
    }
    if(['failed','cancelled','interrupted','abstained'].includes(run.status)){const b=o.button('重新编辑此问题',()=>editQuestion(run),'question-reedit');editButtons.push(b);card.append(b);}
+   if(run.status==='abstained'&&run.source_state!=='revoked'&&result?.status==='ABSTAIN_PROVIDER_FAILURE'){const b=o.button('只查原文',()=>editQuestion(run,'evidence_only'),'question-evidence');editButtons.push(b);card.append(b);}
    root.append(card);
   }
   if(waitNodes.length)updateWait();if(nearBottom)requestAnimationFrame(()=>panel.scrollTop=panel.scrollHeight);else panel.scrollTop=oldScroll;scopeChanged();

@@ -19,14 +19,17 @@ _UNITS={
 _UNIT_PATTERN='|'.join(re.escape(v) for values in _UNITS.values() for v in values)
 _QUANTITY=re.compile(r'(?<![a-z0-9_.])(-?\d+(?:\.\d+)?)\s*('+_UNIT_PATTERN+r')(?![a-z])',re.I)
 _UNIT_ALIAS={v:k for k,values in _UNITS.items() for v in values}
-_STOP=set('the a an is are be been being must should may can will shall to of for in on at by as and or it this that only after before if when unless immediately not no never without permitted allowed required'.split())
+_STOP=set('the a an is are be been being must should may can will shall to of for in on at by as and or it this that only after before if when unless immediately alternatively otherwise not no never without permitted allowed required'.split())
 _CONCEPTS={'服务器':'server','服务端':'server','备份':'backup','连接':'connection','超时时间':'timeout','超时':'timeout',
            '重试':'retry','访问':'access','远程':'remote','允许':'permit','许可':'permit','禁止':'permit','重启':'restart',
            '完成':'complete','之后':'after','以后':'after','之前':'before','以前':'before','仅':'only','只有':'only',
-           '不':'not','未':'not','立即':'immediately','分钟':'minute','秒钟':'second','秒':'second'}
+           '不':'not','未':'not','立即':'immediately','分钟':'minute','秒钟':'second','秒':'second',
+           '本地':'local','本机':'local','或者':'or','否则':'otherwise','也可':'or'}
 _NEG=re.compile(r"\b(?:not|no|never|cannot|without|forbidden|prohibited|denied)\b|n['’]t\b|禁止|不得|不能|不允许|不应|未获|不可")
 _CONDITION=re.compile(r'\b(?:only\s+(?:after|before|if|when)|unless|provided\s+that)\b|仅当|只有|必须.{0,16}(?:后|前|时)|仅在')
 _RANGE=re.compile(r'\b(?:between|from)\s*(-?\d+(?:\.\d+)?)\s*(?:and|to)\s*(-?\d+(?:\.\d+)?)\b|(-?\d+(?:\.\d+)?)\s*(?:至|到|～|~)\s*(-?\d+(?:\.\d+)?)')
+_CONTRAST=re.compile(r'\s*,?\s*\b(?:but|whereas|however)\b\s*|[，,]?\s*(?:但是|然而|但)\s*')
+_ALTERNATIVE=re.compile(r'\b(?:or|otherwise|alternatively)\b|或者|或是|否则|也可|亦可')
 
 def _normalize(text):
     return re.sub(r'\s+',' ',unicodedata.normalize('NFKC',text).lower()).strip()
@@ -53,6 +56,30 @@ def _aligned(claim,sentence):
     a,b=_tokens(claim),_tokens(sentence)
     return bool(a and len(a&b)>=min(2,len(a)) and len(a&b)/len(a)>=.75)
 
+def _contrast_units(text):
+    # Only explicit contrast boundaries; do not split arbitrary commas, which
+    # can detach a condition or a negation from the action it governs.
+    return [part.strip(' ,，') for part in _CONTRAST.split(text) if part.strip(' ,，')]
+
+def _branch_shape(text):
+    # Keep logical qualifiers separately: bag-of-content-word inclusion alone
+    # must not authorize a new unconditional alternative or changed comparator.
+    condition=_CONDITION.search(text)
+    return (bool(_NEG.search(text)),condition.group() if condition else None,
+            tuple(re.findall(r'-?\d+(?:\.\d+)?',text)))
+
+def _new_alternative(part,sources):
+    branches=[b.strip(' ,，') for b in _ALTERNATIVE.split(part)]
+    if len(branches)<2:return False
+    supported=[b.strip(' ,，') for s in sources for b in _ALTERNATIVE.split(s)]
+    for branch in branches:
+        if not branch:return True
+        words=_tokens(branch)
+        if not any(branch==source or (words and words<=_tokens(source) and
+                       _branch_shape(branch)==_branch_shape(source)) for source in supported):
+            return True
+    return False
+
 def _quantities(sentence):
     for match in _QUANTITY.finditer(sentence):
         # Prefix stops at the previous clause/value, binding nearby property names.
@@ -65,18 +92,22 @@ def contradiction(claim,cited):
     if not claim or not sentences:return None
     for part in _sentences(claim):
         # An exact supported sentence does not need inference by these heuristics.
-        if any(part==s or part in s and not (_NEG.search(s) or _CONDITION.search(s)) for s in sentences):
+        if any(part==s for s in sentences):
             continue
         def same_action(source):
             guard=_CONDITION.search(source);proposed=_CONDITION.search(part)
             return bool(guard and _aligned(part[:proposed.start()] if proposed else part,source[:guard.start()]))
-        aligned=[s for s in sentences if _aligned(part,s) or same_action(s)]
-        if aligned:
-            polarity=bool(_NEG.search(part))
-            if all(bool(_NEG.search(s))!=polarity for s in aligned):
+        head=_ALTERNATIVE.split(part)[0]
+        aligned=[s for s in sentences if _aligned(part,s) or same_action(s) or (head!=part and _aligned(head,s))]
+        source_units=[unit for sentence in sentences for unit in _contrast_units(sentence)]
+        for unit in _contrast_units(part):
+            matches=[s for s in source_units if _aligned(unit,s)]
+            if matches and all(bool(_NEG.search(s))!=bool(_NEG.search(unit)) for s in matches):
                 return 'NEGATION_CONTRADICTION'
+        if aligned:
             guarded=[s for s in aligned if _CONDITION.search(s)]
             if guarded and len(guarded)==len(aligned):
+                if _new_alternative(part,guarded):return 'CONDITION_UNSUPPORTED_BRANCH'
                 # Require retained condition words and explicit condition content;
                 # changing AFTER to BEFORE must not be treated as preservation.
                 if not _CONDITION.search(part):return 'CONDITION_DROPPED'
@@ -85,8 +116,9 @@ def contradiction(claim,cited):
                     proposed=re.search(r'\b(only\s+(?:after|before|if|when)|unless|provided\s+that)\b',part)
                     if after and proposed and after.group(1)!=proposed.group(1):return 'CONDITION_CHANGED'
                     if after and proposed:
-                        required=_tokens(source[after.end():])
-                        if required and len(required&_tokens(part[proposed.end():]))/len(required)<.75:
+                        options=[_tokens(branch) for branch in _ALTERNATIVE.split(source[after.end():])]
+                        supplied=_tokens(part[proposed.end():])
+                        if options and not any(required and len(required&supplied)/len(required)>=.75 for required in options):
                             return 'CONDITION_CHANGED'
         quantities=[q for s in sentences for q in _quantities(s)]
         for value,unit,anchors in _quantities(part):
