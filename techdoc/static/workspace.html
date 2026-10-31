@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>知识库 · RAG</title><link rel="stylesheet" href="/assets/workspace.css"><script src="/assets/workspace-model.js" defer></script><script src="/assets/query-stream.js" defer></script><script src="/assets/workspace-chat.js" defer></script><script src="/assets/workspace-studio.js" defer></script><script src="/assets/workspace-overview.js" defer></script><script src="/assets/workspace-layout.js" defer></script><script src="/assets/workspace-uploads.js" defer></script><script src="/assets/workspace.js" defer></script></head>
 <body>
-<header class="global-header"><a class="brand" href="/" data-home>▧ <span>知识库</span></a><span class="candidate">单人知识库工作区</span><span class="header-note">基于你的资料，整理与学习</span></header>
+<header class="global-header"><a class="brand" href="/" data-home><img class="book-mark" src="/assets/book.svg" alt="" aria-hidden="true" width="26" height="26"><span>知识库</span></a><span class="header-note">基于你的资料，整理与学习</span></header>
 <div id="notice" role="status" aria-live="polite" hidden></div>
 <section id="auth-panel" hidden class="auth-panel"><h2>登录已失效</h2><p>已暂停自动请求。重新登录后读取服务器状态，不会自动重复上传。</p><button id="relogin">重新登录</button></section>
 <section id="route-error" hidden class="auth-panel"><h2>无法打开此知识库</h2><p id="route-error-text"></p><a href="/" data-home>返回我的知识库</a></section>
@@ -27,7 +27,7 @@
   </aside>
   <main id="chat-panel" class="chat-panel panel" role="tabpanel" aria-labelledby="chat-tab">
    <div class="panel-heading"><h2>对话</h2><span id="session-title" class="session-title"></span><button id="rename-chat">改名</button><button id="history-chat">历史</button><button id="new-chat">新对话</button></div>
-   <div id="chat-welcome" class="chat-empty"><div class="book-icon">▧</div><h2 id="chat-title"></h2><p id="chat-summary"></p><p class="muted">回答依据来自所选资料，点击引用可以核对原文。</p><p class="muted query-expectation">全新问题首次处理可能需要数十秒。重复提问可能因缓存加快，实际时间取决于资料范围和模型响应。</p></div>
+   <div id="chat-welcome" class="chat-empty"><div class="book-icon" aria-hidden="true"><img src="/assets/book.svg" alt="" width="52" height="52"></div><h2 id="chat-title"></h2><p id="chat-summary"></p><p class="muted">回答依据来自所选资料，点击引用可以核对原文。</p><p class="muted query-expectation">全新问题首次处理可能需要数十秒。重复提问可能因缓存加快，实际时间取决于资料范围和模型响应。</p></div>
    <div id="overview-main" class="overview-main"></div>
    <button id="older-messages" class="text-button" hidden>加载更早消息</button><div id="messages" class="messages" aria-live="polite"></div>
    <div class="composer"><label for="question">问题草稿</label><textarea id="question" rows="3" maxlength="2000" placeholder="向你的资料提问…"></textarea><div class="composer-controls"><label><input id="compare-sources" type="checkbox"> 对比所选资料</label><label><span class="sr-only">回答方式</span><select id="answer-mode"><option value="answer">生成回答</option><option value="evidence_only">查找原文</option></select></label><button id="stop-chat" hidden>停止回答</button><button id="recover-chat" hidden>查询提交状态</button><button id="send-chat" class="primary">发送 ↑</button></div><p id="chat-status" class="hint" role="status"></p><div class="composer-footer"><span id="composer-scope">请选择资料</span><span class="muted">草稿保存在当前标签页</span></div></div>

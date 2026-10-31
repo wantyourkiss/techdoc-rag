@@ -363,6 +363,7 @@ def create_app(data_dir: str | Path | None = None, *, knowledge_mode=None, impor
                 'workspace-layout.js':('workspace_layout.js','application/javascript'),
                 'workspace-model.js':('workspace_model.js','application/javascript'),
                 'workspace.css':('workspace.css','text/css'),
+                'book.svg':('book.svg','image/svg+xml'),
                 'ui-model.js':('ui_model.js','application/javascript'),
                 'app.js':('app.js','application/javascript'),
                 'ui.css':('ui.css','text/css'),
