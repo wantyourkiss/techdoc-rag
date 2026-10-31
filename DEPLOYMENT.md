@@ -81,6 +81,32 @@ NAS Caddy 需支持内置 proxy_protocol 模块。全局配置示例：
 
 应用与 Caddy 单独配置同一个至少 32 字符的 `TECHDOC_PROXY_AUTH_TOKEN`，保存在受保护的环境配置中。Caddy reverse_proxy 必须覆盖而非追加：`header_up X-Techdoc-Client-IP {http.request.remote.host}` 和 `header_up X-Techdoc-Proxy-Auth {$TECHDOC_PROXY_AUTH_TOKEN}`。该 token 只用于来源声明，不替代浏览器认证。Caddy 若通过环境读取它，需给 Caddy 服务单独配置环境；不要将整个模型服务密钥文件共享给代理。应用只接受匹配 token 的来源声明，任意客户端 X-Forwarded-For 均不能用于绕过限流。
 
+### 单一代理凭据来源与轮换
+
+systemd 部署建议将代理 token 单独存放在 `/private/proxy-auth.env`，内容仅一行 `TECHDOC_PROXY_AUTH_TOKEN=...`，所有者限定为运行服务的账号，文件权限 0600。应用与 Caddy 的服务配置都添加 `EnvironmentFile=/private/proxy-auth.env`；应用原环境文件中移除重复条目，Caddyfile 使用上述环境占位符，保留 0600。Caddy 仅加载这份代理配置，不读取模型和浏览器凭据文件。Compose 部署需通过已有环境映射把同一来源传入容器。
+
+轮换在维护窗口进行：确认没有未完成任务，备份受保护配置；停止应用与公网代理；原子更新这一个私密文件并保持 0600；在加载新 token 的环境中验证 Caddy 配置；启动两个服务并等待模型就绪；检查两个实际进程读取的代理值一致（只输出比较结果，不输出值），再执行三入口验收。失败则恢复旧文件、重新启动两个服务并复验。仅改文件不会改变已运行进程的环境。
+
+### 限流容量的可用性取舍
+
+认证失败状态最多保留 4096 个来源，过期后可释放。容量满时，尚未记录的来源会先收到 429，即使随后提供的密码本来正确；已有来源仍按各自失败窗口检查。这是防止状态无界增长的 fail-closed 取舍，可能影响正常用户，不是“所有情况下来源都互不影响”的保证。来源洪泛即可触发，不以代理 token 泄露为前提；公网代理覆盖客户端自带来源头。不要在生产上用来源洪泛测试容量。
+
+### 三入口发布验收
+
+本项目的 LAN HTTPS + 公网双栈部署使用以下发布门禁，替换地址和私有证书路径；浏览器凭据从受保护环境读取，不写进命令参数：
+
+```bash
+python -m scripts.verify_entrypoints \
+  --lan-url https://LAN_HOST:8765 \
+  --public-url https://rag.example.com:18443 \
+  --lan-ca /private/lan-ca.pem \
+  --output /private/entrypoint-health.json
+```
+
+LAN、IPv4、IPv6 必须分别通过证书验证、匿名 401 和 Basic 挑战、正确认证后的最小 `status=ready` 响应；每个返回的地址都检查，公网地址不得误用回环、私网或 IPv4-mapped IPv6。探测使用指定地址族的原始 HTTPS 连接，不经过环境 HTTP 代理，也不跟随重定向。任一失败返回非零退出码。
+
+本项目 NAS 发布编排在更新版本指针前调用相同门禁，并将 `entrypoints_verified` 和分入口结果写入发布记录；静态资源身份另用 `public_assets_verified` 表示。通用最小包提供上述 CLI 和发布记录辅助函数，其他部署编排需显式接入，Compose 启动不会自动配置三入口。发布记录写入失败会恢复原版本指针及原结果文件。CI 使用隔离测试验证失败门禁，不保存 NAS 或公网登录凭据；真实三入口由发布机执行。健康探测也不能代替代理 token 的进程一致性检查或所有用户网络的可达性测试。
+
 分别强制 IPv4 / IPv6 验证：证书可信、匿名 401、登录后页面与引用可读、SSE 中间事件及时到达、NAS 隧道重启后恢复。DNS、ECS 安全组和家庭 IPv6 防火墙均要按入口放行。
 
 证书续期和 IPv6 DDNS 需要单独维护。手动 DNS-01 证书不会自动续期；IPv4 隧道无需依赖家庭公网 IPv6 地址固定。

@@ -395,12 +395,8 @@ def create_app(data_dir: str | Path | None = None, *, knowledge_mode=None, impor
     @app.get('/',response_class=HTMLResponse)
     def home():
         path=Path(__file__).parent/'static'/('workspace.html' if knowledge_mode else 'index.html')
-        text=path.read_text(encoding='utf-8');scripts="'self'"
-        if not knowledge_mode:
-            nonce=secrets.token_urlsafe(24);text=text.replace('<script>','<script nonce="'+nonce+'">')
-            scripts+=" 'nonce-"+nonce+"'"
-        return HTMLResponse(text,headers={
-            'Content-Security-Policy':"default-src 'none'; style-src 'self' 'unsafe-inline'; script-src "+scripts+"; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'"})
+        return HTMLResponse(path.read_text(encoding='utf-8'),headers={
+            'Content-Security-Policy':"default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'"})
 
     return app
 

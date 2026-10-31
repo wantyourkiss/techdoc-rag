@@ -52,3 +52,19 @@ def test_workspace_csp_has_no_inline_script_exception(public):
     response=public.get('/',auth=('test','test'));policy=response.headers['content-security-policy']
     script=next(p for p in policy.split(';') if p.strip().startswith('script-src'))
     assert "'unsafe-inline'" not in script and "'self'" in script
+
+
+def test_both_templates_use_only_external_scripts_and_exact_self_policy(tmp_path,monkeypatch):
+    from html.parser import HTMLParser
+    class Scripts(HTMLParser):
+        def __init__(self):super().__init__();self.inline=0
+        def handle_starttag(self,tag,attrs):
+            if tag=='script' and 'src' not in dict(attrs):self.inline+=1
+            assert not any(name.startswith('on') for name,value in attrs)
+    monkeypatch.setenv('TECHDOC_RETRIEVER','bm25');monkeypatch.delenv('TECHDOC_RERANKER_MODEL',raising=False)
+    for mode in (False,True):
+        with TestClient(create_app(tmp_path/str(mode),knowledge_mode=mode,import_worker=False)) as c:
+            response=c.get('/');assert response.status_code==200
+            parser=Scripts();parser.feed(response.text);assert parser.inline==0
+            script=next(p.strip() for p in response.headers['content-security-policy'].split(';') if p.strip().startswith('script-src'))
+            assert script=="script-src 'self'" and 'nonce=' not in response.text
