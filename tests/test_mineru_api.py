@@ -94,6 +94,49 @@ def test_table_cells_and_spans_survive_without_rendering_provider_html():
  assert blocks[0]['table_structure'][2]['column']==1
  assert '<table>' not in blocks[0]['text']
 
+@pytest.mark.parametrize('html',[
+ '<p>3</p><p>0</p>','<div>3</div><div>0</div>',
+ '<ul><li>3</li><li>0</li></ul>','3<br>0',
+ '<div><p>3</p><p>0</p></div>','<p>3</p><div>0</div>',
+])
+def test_table_block_boundaries_cannot_create_a_new_number(html):
+ item={'type':'table','table_body':'<table><tr><td>Timeout seconds</td><td>'+html+'</td></tr></table>','page_idx':0,'bbox':[1,2,30,40]}
+ _,blocks=m.convert_result('x.pdf',pdf(),result([item]))
+ assert blocks[0]['text']=='Timeout seconds | 3 ; 0'
+ assert blocks[0]['table_structure'][1]['paragraphs']==['3','0']
+ assert '30' not in blocks[0]['text']
+
+@pytest.mark.parametrize('html,expected',[
+ ('<p>30 seconds</p>','30 seconds'),
+ ('<span>3</span><strong>0</strong> seconds','30 seconds'),
+ ('<p> 30&nbsp; seconds </p><p>60 seconds</p>','30 seconds ; 60 seconds'),
+])
+def test_table_inline_styles_and_real_values_are_preserved(html,expected):
+ item={'type':'table','table_body':'<table><tr><td>'+html+'</td></tr></table>','page_idx':0,'bbox':[1,2,30,40]}
+ _,blocks=m.convert_result('x.pdf',pdf(),result([item]))
+ assert blocks[0]['text']==expected
+
+@pytest.mark.parametrize('kind,field,value',[
+ ('text','text',{'unexpected':'30 seconds'}),('text','text',['30']),('text','text',30),
+ ('text','text',True),('text','text',None),
+ ('equation','text',{'latex':'x'}),('equation','text',3),('equation','text',None),
+ ('list','list_items','30 seconds'),('list','list_items',[30]),('list','list_items',None),
+ ('image','image_caption','30 seconds'),('image','image_footnote',{'x':'30'}),
+ ('table','table_caption','30 seconds'),('table','table_footnote',[False]),
+ ('table','table_body',{'html':'<table></table>'}),
+])
+def test_malformed_content_fields_cannot_become_indexable_strings(kind,field,value):
+ item={'type':kind,'page_idx':0,'bbox':[1,2,30,40],field:value}
+ with pytest.raises(CatalogError,match='MINERU_RESULT_INVALID'):
+  m.convert_result('x.pdf',pdf(),result([item]))
+
+def test_valid_formula_list_and_caption_keep_text_without_object_coercion():
+ items=[{'type':'equation','text':'E = mc^2','page_idx':0,'bbox':[1,2,30,40]},
+        {'type':'list','list_items':['First','Second'],'page_idx':0,'bbox':[1,2,30,40]},
+        {'type':'image','image_caption':['Figure 1'],'image_footnote':['Caption note'],'page_idx':0,'bbox':[1,2,30,40]}]
+ _,blocks=m.convert_result('x.pdf',pdf(),result(items))
+ assert [b['text'] for b in blocks if b['indexable']]==['E = mc^2','First\nSecond','Figure 1\nCaption note']
+
 def test_visual_and_unconvertible_content_disclosed_not_indexed():
  items=[{'type':'text','text':'Visible body','page_idx':0,'bbox':[1,2,3,4]},
         {'type':'image','image_caption':['Figure A'],'image_footnote':[],'page_idx':0,'bbox':[1,2,3,4]},

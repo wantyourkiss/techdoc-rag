@@ -153,6 +153,7 @@ def fetch_result(name,data,directory,check=lambda:None,progress=lambda stage:Non
   if owns:client.close()
 
 class _Table(HTMLParser):
+ _BLOCKS={'p','div','li','ul','ol','dl','dt','dd','section','article','blockquote','pre','h1','h2','h3','h4','h5','h6'}
  def __init__(self):super().__init__(convert_charrefs=True);self.rows=[];self.cell=None;self.depth=0
  def handle_starttag(self,tag,attrs):
   if tag in ('script','style','iframe','object'):raise ValueError()
@@ -165,11 +166,14 @@ class _Table(HTMLParser):
    attrs=dict(attrs);rowspan=int(attrs.get('rowspan','1'));colspan=int(attrs.get('colspan','1'))
    if not 1<=rowspan<=200 or not 1<=colspan<=100:raise ValueError()
    self.cell={'text':'','rowspan':rowspan,'colspan':colspan,'header':tag=='th'}
-  if tag=='br' and self.cell is not None:self.cell['text']+=' '
+  if (tag=='br' or tag in self._BLOCKS) and self.cell is not None:self.cell['text']+='\n'
  def handle_endtag(self,tag):
   if tag in ('td','th'):
    if self.cell is None:raise ValueError()
-   self.cell['text']=' '.join(self.cell['text'].split());self.rows[-1].append(self.cell);self.cell=None
+   paragraphs=[' '.join(line.split()) for line in self.cell['text'].splitlines() if line.strip()]
+   self.cell['paragraphs']=paragraphs
+   self.cell['text']=' ; '.join(paragraphs);self.rows[-1].append(self.cell);self.cell=None
+  if tag in self._BLOCKS and self.cell is not None:self.cell['text']+='\n'
   if tag=='table':self.depth-=1
  def handle_data(self,text):
   if self.cell is not None:self.cell['text']+=text
@@ -211,8 +215,12 @@ def convert_result(name,data,raw,model='vlm',version='',origin='file'):
   office=Path(name).suffix.lower()=='.docx' and layout.get('_backend')=='office'
   sid=digest(['snapshot_mineru_v1',basename,version,source_sha,identity,origin])[:28]
   blocks=[];warnings={'MINERU_MACHINE_EXTRACTED'};locations=[];text_pages=set()
+  def strings(value):
+   if not isinstance(value,list) or any(not isinstance(v,str) for v in value) or sum(map(len,value))>MAX_CHARS:raise ValueError()
+   return value
   def add(kind,text,locator,indexed=True,**extra):
-   text=str(text).strip()
+   if not isinstance(text,str) or len(text)>MAX_CHARS:raise ValueError()
+   text=text.strip()
    if not text:return
    blocks.append(dict(block(sid,len(blocks),kind,text,basename+' · '+str(locator.get('page',locator.get('converted_page',''))),locator,indexable=indexed,verified=False),**extra))
    if indexed:text_pages.add(locator.get('page',locator.get('converted_page',locator.get('section_index'))))
@@ -226,24 +234,24 @@ def convert_result(name,data,raw,model='vlm',version='',origin='file'):
     if not isinstance(bbox,list) or len(bbox)!=4 or any(type(v) not in (float,int) or not math.isfinite(v) or not 0<=v<=1000 for v in bbox) or bbox[0]>bbox[2] or bbox[1]>bbox[3]:raise ValueError()
     loc={'page' if Path(name).suffix.lower()=='.pdf' else 'converted_page':pi+1,'bbox':bbox,'coordinate_system':'normalized_1000','extraction':'mineru_api','source_kind':'machine_extracted'}
    kind=item.get('type')
-   if kind=='text':add('heading' if item.get('text_level') else 'paragraph',item.get('text',''),loc)
-   elif kind=='equation':add('formula',item.get('text',''),loc)
+   if not isinstance(kind,str):raise ValueError()
+   if kind=='text':add('heading' if item.get('text_level') else 'paragraph',item['text'],loc)
+   elif kind=='equation':add('formula',item['text'],loc)
    elif kind=='list':
-    values=item.get('list_items',[])
-    if not isinstance(values,list) or any(not isinstance(v,str) for v in values):raise ValueError()
+    values=strings(item['list_items'])
     add('list','\n'.join(values),loc)
    elif kind=='table':
+    body=item.get('table_body','')
+    if not isinstance(body,str):raise ValueError()
+    caption=strings(item.get('table_caption',[]));foot=strings(item.get('table_footnote',[]))
     try:
-     table=_Table();table.feed(item.get('table_body',''));table.close();text,cells=table.result()
-     caption=item.get('table_caption',[]);foot=item.get('table_footnote',[])
-     if not isinstance(caption,list) or not isinstance(foot,list) or any(not isinstance(v,str) for v in caption+foot):raise ValueError()
+     table=_Table();table.feed(body);table.close();text,cells=table.result()
      add('table','\n'.join(caption+[text]+foot),loc,table_structure=cells)
     except (ValueError,TypeError):
      add('table_unverified','[Table structure unavailable]',loc,False);warnings.add('MINERU_UNSUPPORTED_CONTENT');locations.append(dict(loc,kind='table_unverified'))
    elif kind=='image':
     add('figure_unverified','[Image relations not interpreted]',loc,False);warnings.add('MINERU_IMAGE_CONTENT_EXCLUDED');locations.append(dict(loc,kind='figure_unverified'))
-    captions=item.get('image_caption',[])+item.get('image_footnote',[])
-    if any(not isinstance(v,str) for v in captions):raise ValueError()
+    captions=strings(item.get('image_caption',[]))+strings(item.get('image_footnote',[]))
     add('caption','\n'.join(captions),loc)
    else:
     add('unparsed','[Unsupported extracted structure]',loc,False);warnings.add('MINERU_UNSUPPORTED_CONTENT');locations.append(dict(loc,kind='unparsed'))

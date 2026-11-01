@@ -27,6 +27,8 @@ Only HTTPS object URLs from the documented upload/download hosts are allowed; re
 
 Structured text, formulas and bounded table cells are preserved with page positions and normalized coordinates. Table row/column spans are stored as structure. Provider HTML is never inserted into the browser. Unsupported structures and image relationships are excluded with a visible report. Discarded page regions and empty pages are disclosed.
 
+Table paragraphs, block elements and explicit line breaks remain separate values; inline styling does not split a number. The stored cell structure also preserves paragraph segments. Text, formula, caption and list fields must have their expected JSON types; arbitrary objects are not converted into evidence text.
+
 Extracted text is **machine-generated evidence text**, not human-verified OCR or a proof of complete extraction. A successful parse is not a quality certification. Cloud model weights are not pinned; snapshots include a structured-result digest and adapter identity. Native Office output uses document structure order, without fabricated page numbers or coordinates. Only a provider-converted paged result uses converted-document page numbers; these do not guarantee the original Word layout.
 
 Use the download link to verify important values against the original document. The existing claim review and bounded factual guards still apply, with `answer_semantics_verified=false`.

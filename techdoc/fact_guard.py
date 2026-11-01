@@ -91,12 +91,12 @@ def contradiction(claim,cited):
     """Return a stable reason for a recognizable contradiction, otherwise None."""
     claim=_normalize(claim);sentences=_sentences(_normalize(cited))
     if not claim or not sentences:return None
-    threshold=threshold_conflict(claim,sentences,_tokens)
-    if threshold:return threshold
     for part in _sentences(claim):
         # An exact supported sentence does not need inference by these heuristics.
         if any(part==s for s in sentences):
             continue
+        threshold=threshold_conflict(part,sentences,_tokens)
+        if threshold:return threshold
         def same_action(source):
             guard=_CONDITION.search(source);proposed=_CONDITION.search(part)
             return bool(guard and _aligned(part[:proposed.start()] if proposed else part,source[:guard.start()]))
