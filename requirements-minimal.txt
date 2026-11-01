@@ -3,4 +3,5 @@ uvicorn>=0.30,<1
 python-multipart>=0.0.12,<1
 PyMuPDF>=1.24,<2
 python-docx>=1.1,<2
-# Tests only: httpx>=0.27,<1
+# Cloud parsing HTTP client (also used by provider contract tests).
+httpx==0.28.1

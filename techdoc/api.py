@@ -38,6 +38,9 @@ class PlanInspectionBody(QueryBody):
 def create_app(data_dir: str | Path | None = None, *, knowledge_mode=None, import_worker=True,query_worker=None) -> FastAPI:
     from .auth_config import browser_access
     access=browser_access()  # Fail before acquiring the owner, touching files or loading models.
+    from .mineru_api import parser_mode
+    if parser_mode()=='mineru_api' and not os.getenv('TECHDOC_MINERU_API_TOKEN','').strip():
+        raise RuntimeError('MINERU_NOT_CONFIGURED')
     from .auth_throttle import AuthThrottle
     auth_throttle=AuthThrottle(os.getenv('TECHDOC_PROXY_AUTH_TOKEN',''))
     root=Path(data_dir or os.getenv('TECHDOC_DATA_DIR','./runtime_data')).resolve()
@@ -364,6 +367,7 @@ def create_app(data_dir: str | Path | None = None, *, knowledge_mode=None, impor
                 'workspace-model.js':('workspace_model.js','application/javascript'),
                 'workspace.css':('workspace.css','text/css'),
                 'book.svg':('book.svg','image/svg+xml'),
+                'workspace-parsing.js':('workspace_parsing.js','application/javascript'),
                 'ui-model.js':('ui_model.js','application/javascript'),
                 'app.js':('app.js','application/javascript'),
                 'ui.css':('ui.css','text/css'),

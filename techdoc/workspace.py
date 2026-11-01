@@ -69,6 +69,8 @@ class WorkspaceService(KnowledgeService):
                 item = dict(row); metadata = json.loads(item.pop('metadata_json') or '{}')
                 item.update(processing_state='ready' if row['active_version_id'] else 'unavailable',
                             warnings=metadata.get('warnings',[]),origin=metadata.get('origin','file'))
+                from .parse_quality import parsing_report
+                item['parsing_report']=parsing_report(metadata)
                 items.append(item)
             # Counts cover the entire KB, independent of this page or search.
             ready = conn.execute("SELECT count(*) FROM documents WHERE kb_id=? AND state='active' AND active_version_id IS NOT NULL",(kb_id,)).fetchone()[0]
@@ -147,7 +149,9 @@ class WorkspaceService(KnowledgeService):
             selected.append(item); size += cost
         # Revalidate after file I/O so a concurrent trash cannot disclose a late response.
         self.version(version_id,kb_id=kb_id)
+        from .parse_quality import parsing_report
         return {'version_id':version_id,'document_id':row['document_id'],'knowledge_base_id':row['kb_id'],
+                'parsing_report':parsing_report(obj['metadata']),
                 'display_name':row['display_name'],'version_label':row['version_label'],
                 'historical':row['active_version_id']!=version_id,'blocks':selected,'total_blocks':len(blocks),
                 'next_offset':offset+len(selected) if offset+len(selected)<len(blocks) else None,

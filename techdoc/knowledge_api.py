@@ -193,7 +193,9 @@ def install_knowledge_api(app,service,imports,runs,studio):
 
     @router.get('/capabilities')
     def capabilities():
+        from .mineru_api import parser_mode
         return {'knowledge_mode':True,'phase':'workspace_release_candidate',
+                'document_parser':parser_mode(),'cloud_parser_formats':['pdf','docx'] if parser_mode()=='mineru_api' else [],
                 'public_release_ready':os.getenv('TECHDOC_WORKSPACE_RELEASED')=='1',
                 'studio_tools':['notes','overview'],'tutorial_enabled':False,'chat_enabled':True,'durable_imports':True,
                 'generative_answer_enabled':bool(os.getenv('LLM_BASE_URL') and os.getenv('LLM_MODEL') and os.getenv('LLM_API_KEY')),

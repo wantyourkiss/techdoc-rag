@@ -87,3 +87,7 @@ python -m pytest tests -q
 长期维护先运行 `python -m scripts.maintain_workspace /path/to/runtime_data` 查看报告。需要整理时停服并指定 `--apply --backup /outside/data/before.zip`；仅清理超过保留期的终态中间进度事件，保留终态 SSE、任务、幂等回执、消息、回答、引用和全部原件。默认 30 天，最少 7 天。不会自动 VACUUM 或物理删除资料；业务历史和回执暂不自动过期。
 
 引用逐字核验和模型复核不等于事实保证。针对明确数值绑定、单位、否定、条件和范围矛盾有保守自动防护；未知改写仍可能出错，关键结论应核对引用。48 条模型替身对抗用例通过，不代表真实模型准确率或独立人工 Gold。解析以文本为主，不保证扫描件 OCR、复杂图表或图片事实。物理历史回收、资源自动重排队和多租户功能未提供。
+
+## Optional cloud document parsing
+
+For new PDF/DOCX imports, see [MinerU API setup and evidence limitations](MINERU_API.md). The default remains local parsing.

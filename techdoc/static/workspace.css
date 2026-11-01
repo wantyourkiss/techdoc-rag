@@ -32,3 +32,6 @@
 .chat-empty .book-icon{display:grid;place-items:center;width:52px;height:52px}
 .chat-empty .book-icon img{display:block}
 @media(max-width:1279px){.chat-panel .chat-empty{min-height:0;overflow-y:auto}}
+
+.parsing-report{margin:0 14px 12px;padding:8px 10px;border:1px solid #e7dcc4;border-radius:9px;background:#fffaf0;font-size:12px;overflow-wrap:anywhere}.parsing-report summary{cursor:pointer;color:#785a24}.parsing-report p{margin:7px 0}.parse-status{color:#946b28!important}.cloud-parser-notice{padding:12px;background:#eef4ef;border-radius:10px;font-size:13px;line-height:1.8}
+.chat-panel .chat-empty{min-height:0;overflow-y:auto}

@@ -70,6 +70,10 @@ def reconcile_import_files(catalog):
         if path.is_file():
             if sha256(path.read_bytes()).hexdigest()!=row['source_sha256']:raise CatalogError('IMPORT_INPUT_CORRUPT')
             path.unlink()
+        for name in ('mineru-request.json','mineru-result.zip'):
+            artifact=path.parent/name
+            if artifact.is_symlink():raise CatalogError('IMPORT_JOURNAL_INVALID')
+            artifact.unlink(missing_ok=True)
     return removed
 
 
@@ -174,6 +178,8 @@ class ImportService:
             result = {k:job[k] for k in ('id','kb_id','state','stage','attempt','error_code','created_at','updated_at','request_key')}
             result.update(import_id=row['id'],document_id=row['document_id'],display_name=row['display_name'],
                           retryable=job['state'] in ('failed','cancelled','interrupted') and self._input_path(row).is_file())
+            if job['error_code'] in ('MINERU_SUBMISSION_UNCERTAIN','MINERU_PARSE_FAILED','MINERU_UPLOAD_EXPIRED'):
+                result['retryable']=False
             result['result'] = json.loads(row['result_json']) if row['result_json'] else None
             return result
 
@@ -241,14 +247,27 @@ class ImportService:
             self.queue.renew(job['id'],job['lease_token'],stage='parsing')
             data = self._input_path(source).read_bytes()
             if sha256(data).hexdigest()!=source['source_sha256']: raise CatalogError('IMPORT_INPUT_CORRUPT')
-            meta,blocks = parse_snapshot_v2(source['filename'],data,source['version_label'],origin=source['origin'])
+            def check():
+                if self.stop_event.is_set():raise CatalogError('IMPORT_CANCELLED')
+                with self.catalog.reader() as conn:self._check_job(conn,job)
+            from .mineru_api import parser_mode,fetch_result,convert_result
+            if parser_mode()=='mineru_api' and Path(source['filename']).suffix.lower() in ('.pdf','.docx'):
+                raw,model=fetch_result(source['filename'],data,self._input_path(source).parent,check,
+                    lambda stage:self.queue.renew(job['id'],job['lease_token'],stage=stage))
+                meta,blocks=convert_result(source['filename'],data,raw,model,source['version_label'],source['origin'])
+            else:
+                meta,blocks = parse_snapshot_v2(source['filename'],data,source['version_label'],origin=source['origin'])
+            check()
             if not blocks or not any(b.get('indexable') for b in blocks): raise CatalogError('NO_INDEXABLE_CONTENT',status=422)
             meta['original_stored'] = True
             self._publish(job,source,meta,blocks,data)
             self._input_path(source).unlink(missing_ok=True)
+            for name in ('mineru-request.json','mineru-result.zip'):
+                self._input_path(source).parent.joinpath(name).unlink(missing_ok=True)
         except Exception as exc:
             # External library exception messages can contain paths/content; store stable codes only.
-            code = exc.code if isinstance(exc,CatalogError) else ('RETRIEVER_INDEX_BUILD_FAILED' if isinstance(exc,RetrieverBuildFailed) else 'DOCUMENT_IMPORT_FAILED')
+            from .parse_quality import ERRORS
+            code = exc.code if isinstance(exc,CatalogError) else ('RETRIEVER_INDEX_BUILD_FAILED' if isinstance(exc,RetrieverBuildFailed) else (str(exc) if isinstance(exc,ValueError) and str(exc) in ERRORS else 'DOCUMENT_IMPORT_FAILED'))
             try: self.queue.finish(job['id'],job['lease_token'],error_code=code)
             except CatalogError: pass  # Lease loss is resolved by recovery, never by late publication.
         finally:

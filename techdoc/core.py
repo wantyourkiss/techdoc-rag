@@ -66,6 +66,7 @@ class DocParser:
         snap = digest([basename, version, source_sha]+(['md_structure_v2'] if ext=='.md' else []))[:28]
         warnings: list[str] = []
         blocks: list[dict] = []
+        parse_details = {}
 
         def add(kind, text, section, locator, indexed=True, verified=False):
             blocks.append(block(snap, len(blocks), kind, str(text), section, locator,
@@ -159,9 +160,11 @@ class DocParser:
                 raise ValueError('ENCRYPTED_PDF_UNSUPPORTED')
             if doc.page_count > 200:
                 raise ValueError('PDF_TOO_MANY_PAGES')
+            parse_details = {'total_pages':doc.page_count,'empty_pages':[]}
             for pi, page in enumerate(doc, 1):
                 # Treat page as a hard boundary while visual reading order is unverified.
                 section = f'{basename} · page {pi}'
+                page_start = len(blocks)
                 bad_areas = []
                 try:
                     tab = page.find_tables()
@@ -192,6 +195,11 @@ class DocParser:
                     if intersect: warnings.append('PDF_TABLE_CONTENT_EXCLUDED')
                 if page.get_drawings():
                     warnings.append('PDF_VECTOR_DRAWINGS_NOT_INTERPRETED')
+                if page.get_images() and not any(b['kind']=='figure_unverified' for b in blocks[page_start:]):
+                    add('figure_unverified','[PDF image excluded]',section,{'page':pi},indexed=False)
+                    warnings.append('PDF_IMAGE_CONTENT_EXCLUDED')
+                if not any(b['indexable'] and b['text'] for b in blocks[page_start:]):
+                    parse_details['empty_pages'].append(pi);warnings.append('PDF_NO_TEXT_PAGE')
             warnings.append('PDF_READING_ORDER_UNVERIFIED')
 
         if len(blocks)>MAX_BLOCKS or sum(len(b['text']) for b in blocks)>MAX_CHARS:
@@ -201,7 +209,8 @@ class DocParser:
         metadata = {"snapshot_id": snap, "filename": basename, "product_version": version,
                     "source_sha256": source_sha, "parser": 's4a_conservative_pdf_v2' if ext=='.pdf' else ('s4a_conservative_md_structure_v2' if ext=='.md' else f"s4a_conservative_{ext[1:]}"),
                     "block_count": len(blocks), "indexed_block_count": sum(b['indexable'] for b in blocks),
-                    "warnings": sorted(set(warnings))}
+                    "warnings": sorted(set(warnings)),"parse_details":parse_details}
+        metadata['parse_details']['locations'] = [dict(b['locator'],kind=b['kind']) for b in blocks if not b['indexable']][:200]
         return metadata, blocks
 
 

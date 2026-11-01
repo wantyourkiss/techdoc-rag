@@ -6,6 +6,7 @@ No external models, unit conversions, or assumptions about uncited context.
 """
 import re
 import unicodedata
+from .threshold_guard import threshold_conflict,clean_markers
 
 _UNITS={
     'millisecond':('milliseconds','millisecond','msec','ms','毫秒'),
@@ -90,6 +91,8 @@ def contradiction(claim,cited):
     """Return a stable reason for a recognizable contradiction, otherwise None."""
     claim=_normalize(claim);sentences=_sentences(_normalize(cited))
     if not claim or not sentences:return None
+    threshold=threshold_conflict(claim,sentences,_tokens)
+    if threshold:return threshold
     for part in _sentences(claim):
         # An exact supported sentence does not need inference by these heuristics.
         if any(part==s for s in sentences):
@@ -102,7 +105,7 @@ def contradiction(claim,cited):
         source_units=[unit for sentence in sentences for unit in _contrast_units(sentence)]
         for unit in _contrast_units(part):
             matches=[s for s in source_units if _aligned(unit,s)]
-            if matches and all(bool(_NEG.search(s))!=bool(_NEG.search(unit)) for s in matches):
+            if matches and all(bool(_NEG.search(clean_markers(s)))!=bool(_NEG.search(clean_markers(unit))) for s in matches):
                 return 'NEGATION_CONTRADICTION'
         if aligned:
             guarded=[s for s in aligned if _CONDITION.search(s)]
